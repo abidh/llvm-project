@@ -68,6 +68,7 @@ Linetable information will be generated if the following flags are present.
 ## Full Debug Generation
 TODO.
 ### Variables
+Array variables inside function can point to a global variable outside. Those globals will be ignored while iterating globalOps.
 ### Arrays
 #### Adjustable 
 #### Assumed Shape
@@ -75,6 +76,24 @@ TODO.
 #### Assumed Rank
 ### Strings
 ### Pointers and Allocatables
+The obvious implementation will be to treat them as pointer to a type. Thats how classic flang and gfortran seems to handle them in debug info.
+
+integer, pointer :: pt
+(GDB) ptype pt
+type = PTR TO -> ( integer(kind=4) )
+
+But for arrays, the type of the allocatable or pointer variable is the array and not pointer to the array.
+
+integer, pointer, dimension (:,:) :: pa
+integer, target :: array(4,5)
+pa => array
+(gdb) ptype pa
+type = integer(kind=4) (4,5)
+
+The proposal is to keep this behavior in flang.
+
+Debug metadata will also be generated to enable debuggers to find the allocated/associated status of these variables.
+
 ### Derived Types
 TypeInfoOp can be iterated to get the list of all the derived type. It currently lack the location and offsets of the members which will have to beadded either in TypeInfoOp or RecordType/FieldType.
 
