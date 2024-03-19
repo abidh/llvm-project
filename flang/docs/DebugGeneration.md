@@ -70,10 +70,51 @@ TODO.
 ### Variables
 Array variables inside function can point to a global variable outside. Those globals will be ignored while iterating globalOps.
 ### Arrays
+
+The fixed size arrray in the FIR will be represented by DICompositeTypeAttr with a tag value of DW_TAG_array_type.
+Array bounds in each dimension will be represented by DISubrangeAttr. 
+
+DICompositeTypeAttr(dwarf::DW_TAG_array_type)
+  list of DISubrangeAttr(list of IntegerAttr for array bounds in that dimensions)
+end
+
+DISubrangeAttr in mlir takes IntegerAttr at the moment so only works with fixed sizes arrays. It will need to change to support
+assumed size/rank arrays.
+
+
+Example: TODO
+
 #### Adjustable 
+
+The bounds information in DISubrangeAttr will point to an artificial variable which will hold the runtime
+value of the expression used in the array declaration. I am not sure how 
+
+Example; TODO
 #### Assumed Shape
+The assumed shape array will use the similar representation as fixed size array but there will be 2 differences.
+
+1. There will be a DataLocation field whic will be an expression. This will enable debugger to get the data
+pointer from array descriptor. This field is not currently available in DICompositeTypeAttr and may need to be added.
+
+2. The field in DISubrangeAttr for array bounds will be expression which will allow the debugger to get the array bounds
+from descriptor. 
+
+Example: TODO
+
 #### Assumed Size
+
+It is treated as raw arrays. Debug information will not provide any bounds information.
+
 #### Assumed Rank
+
+This is currently unsupported in flang. Its representation will be similar to array representation for asumed shape array with the
+following difference.
+
+1. DICompositeTypeAttr will have a rank field which will be an expression. It will be used to get the rank value from descriptor.
+2. A new DIGenericSubrangeAttr will be added which will allow to debuggers to calculate bounds in any dimension.
+
+Example: TODO
+
 ### Strings
 ### Pointers and Allocatables
 The obvious implementation will be to treat them as pointer to a type. Thats how classic flang and gfortran seems to handle them in debug info.
