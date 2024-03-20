@@ -139,8 +139,45 @@ Debug metadata will also be generated to enable debuggers to find the allocated/
 TypeInfoOp can be iterated to get the list of all the derived type. It currently lack the location and offsets of the members which will have to beadded either in TypeInfoOp or RecordType/FieldType.
 
 ### Association
+
+They will be treated like normal variables. Although we may require to handle the case where 
+the DeclareOp of one variable points to the DeclareOp of another variable (e.g. a => b).
+
 ### Namelists
+
+I dont see a way to extract namelist information at the FIR level. 
+
 ### CommonBlocks
+
+integer a, b
+common /test/ a, b
+
+fir.global common @test_(dense<0> : vector<8xi8>) : !fir.array<8xi8> loc(#loc1)
+
+  %0 = fir.address_of(@test_) : !fir.ref<!fir.array<8xi8>> loc(#loc3)
+  %1 = fir.convert %0 : (!fir.ref<!fir.array<8xi8>>) -> !fir.ref<!fir.array<?xi8>> loc(#loc3)
+  %c0 = arith.constant 0 : index loc(#loc3)
+  %2 = fir.coordinate_of %1, %c0 : (!fir.ref<!fir.array<?xi8>>, index) -> !fir.ref<i8> loc(#loc3)
+  %3 = fir.convert %2 : (!fir.ref<i8>) -> !fir.ref<i32> loc(#loc3)
+  %4:2 = hlfir.declare %3 {uniq_name = "_QMhelperFmatrixEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>) loc(#loc3)
+
+
+A common block generates a GlobalOp that has the storage and then every function where the common block is used has
+DeclareOp for the variable which will point to the global storage through CoordinateOp and AddrOfOp. The debug info will
+have a DICommonBlock in every function where the common block is used. This DICommonBlock will have the variables which will
+point to global storage. Note that currently MLIR does not have any attribute corresponding to DICommonBlock so it will have
+to be added.
+
+;@test_ = common global [8 x i8] zeroinitializer, !dbg !5, !dbg !6
+!1 = !DISubprogram()
+!2 = !DICommonBlock(scope: !1, name: "test")
+!3 = !DIGlobalVariable(scope: !2, name: "a")
+!4 = !DIExpression()
+!5 = !DIGlobalVariableExpression(var: !3, expr: !4)
+!6 = !DIGlobalVariable(scope: !2, name: "b")
+!7 = !DIExpression(DW_OP_plus_uconst, 4)
+!8 = !DIGlobalVariableExpression(var: !6, expr: !7)
+
 ### Modules
 
 # Testing
