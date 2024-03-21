@@ -68,6 +68,27 @@ Linetable information will be generated if the following flags are present.
 ## Full Debug Generation
 TODO.
 ### Variables
+
+Local Variables
+
+  %3 = fir.alloca i32
+  %4:2 = hlfir.declare %3 {uniq_name = "_QFEi"}
+
+
+  #di_local_variable = #llvm.di_local_variable<name = "i", line = 20, type = #di_basic_type>
+
+  %1 = llvm.alloca %0 x i64
+  llvm.intr.dbg.declare #di_local_variable = %1
+  
+We need to create DILocalVariableAttr which will have all the information about the variable like its type and source
+location. This happens in AddDebugFoundationPass by processing the DeclareOp. Next we need to connect this metadata
+to a value. This can only happen at the time when we convert to llvm-ir dialect as mlir::LLVM::DbgDeclareOp requires
+llvm.ptr type. It mean that we need to carry the DILocalVariableAttr somehow till we can use it.
+
+  auto localVarAttr = mlir::LLVM::DILocalVariableAttr::get(...);
+  declOp.getMemref().getDefiningOp()->setAttr("debug", localVarAttr);
+
+
 Array variables inside function can point to a global variable outside. Those globals will be ignored while iterating globalOps.
 ### Arrays
 
@@ -115,7 +136,6 @@ following difference.
 
 Example: TODO
 
-### Strings
 ### Pointers and Allocatables
 The obvious implementation will be to treat them as pointer to a type. Thats how classic flang and gfortran seems to handle them in debug info.
 
@@ -134,6 +154,25 @@ type = integer(kind=4) (4,5)
 The proposal is to keep this behavior in flang.
 
 Debug metadata will also be generated to enable debuggers to find the allocated/associated status of these variables.
+
+### Strings
+
+Fixed sized string will be treated like fixed sizes arrays in the debug info. The allocatabe string will be treated like
+like allocatable array with metadata that will enable debuggers to calculate its size.
+
+  character(len=:), allocatable :: var
+  character(len=20) :: fixed
+
+!1 = !DIBasicType(name: "char", size: 8, encoding: DW_ATE_unsigned_char)
+!2 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 8, DW_OP_deref)
+!3 = !DIExpression(DW_OP_push_object_address, DW_OP_deref)
+!4 = !DICompositeType(tag: DW_TAG_array_type, baseType: !1, elements: !5, dataLocation: !3)
+!5 = !DISubrange(count: !2, lowerBound: 1)
+!6 = !DILocalVariable(name: "var", type: !4)
+
+!7 = !DILocalVariable(name: "fixed", type: !8)
+!8 = !DICompositeType(tag: DW_TAG_array_type, baseType: !1, size: 160, elements: !9)
+!9 = !DISubrange(count: 20, lowerBound: 1)
 
 ### Derived Types
 TypeInfoOp can be iterated to get the list of all the derived type. It currently lack the location and offsets of the members which will have to beadded either in TypeInfoOp or RecordType/FieldType.
