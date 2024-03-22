@@ -278,9 +278,39 @@ mlir::LLVM::DITypeAttr TypeConverter::convert(mlir::MLIRContext *context,
              Ty.isa<fir::BoxType>() || Ty.isa<mlir::TupleType>()) {
     // TODO: These types are currently unhandled. We are generating a
     // placeholder type to allow us to test supported bits.
-    return genPlaceholderType(context);
-  } else
-    TODO(loc, "Unsupported Type!");
+    //Ty.dump();
+    //llvm::errs() << "=============================\n";
+    //return genPlaceholderType(context);
+      //mlir::LLVM::DITypeAttr subrangeTy = mlir::LLVM::DINullTypeAttr::get(context);
+    mlir::LLVM::DITypeAttr elTy = genBasicType(context, mlir::StringAttr::get(context, "integer"),
+                        32, llvm::dwarf::DW_ATE_signed);
+      /*return mlir::LLVM::DICompositeTypeAttr::get(
+      context, llvm::dwarf::DW_TAG_pointer_type,
+      mlir::StringAttr::get(context, ""), fileAttr, getLineFromLoc(loc), scope,
+      elTy, mlir::LLVM::DIFlags::Zero, 0,
+      0, {});*/
+    return mlir::LLVM::DIDerivedTypeAttr::get(
+        context, llvm::dwarf::DW_TAG_pointer_type,
+        mlir::StringAttr::get(context, ""), elTy, 64,
+        0, 0);
+  } else {
+      //Ty.dump();
+      //llvm::errs() << "---------------------------\n";
+      //mlir::LLVM::DITypeAttr subrangeTy = mlir::LLVM::DINullTypeAttr::get(context);
+      mlir::LLVM::DITypeAttr elTy = genBasicType(context, mlir::StringAttr::get(context, "integer"),
+                        32, llvm::dwarf::DW_ATE_signed);
+      /*return mlir::LLVM::DICompositeTypeAttr::get(
+      context, llvm::dwarf::DW_TAG_pointer_type,
+      mlir::StringAttr::get(context, ""), fileAttr, getLineFromLoc(loc), scope,
+      elTy, mlir::LLVM::DIFlags::Zero, 0,
+      0, {});*/
+      return mlir::LLVM::DIDerivedTypeAttr::get(
+        context, llvm::dwarf::DW_TAG_pointer_type,
+        mlir::StringAttr::get(context, ""), elTy, 64,
+        0, 0);
+  }
+    //return genPlaceholderType(context);
+    //TODO(loc, "Unsupported Type!");
 }
 
 void AddDebugFoundationPass::handleGlobalOp(fir::GlobalOp globalOp,
@@ -314,7 +344,7 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
   TypeConverter tyConverter(module);
 
   auto refOp = declOp.getMemref();
-  bool isLocal = refOp.getDefiningOp();
+  bool isLocal = (refOp.getDefiningOp() != nullptr);
   auto diType =
       tyConverter.convert(context, fir::unwrapRefType(declOp.getType()),
                           fileAttr, scopeAttr, declOp.getLoc());
@@ -324,11 +354,16 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
       fileAttr, getLineFromLoc(declOp.getLoc()), isLocal ? 0 : argNo++,
       /* alignInBits*/ 0, diType);
 
-  if (isLocal)
+  if (isLocal) {
     refOp.getDefiningOp()->setAttr("debug", localVarAttr);
-  else {
+    /*mlir::OpBuilder builder(context);
+    builder.create<mlir::LLVM::DbgDeclareOp>(declOp.getLoc(), refOp,
+                                                localVarAttr, nullptr);*/
+  } else {
     if (auto arg = mlir::dyn_cast_or_null<mlir::BlockArgument>(refOp)) {
       bool done = false;
+      //funcOp.setArgAttr(arg.getArgNumber(),"debug", localVarAttr);
+      //funcOp.dump();
       // find the LoadOp that loads the block argument and attach local
       // variable attribute to it.
       funcOp.walk([&](fir::LoadOp loadOp) {
