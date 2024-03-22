@@ -70,16 +70,35 @@ TODO.
 ### Variables
 
 Local Variables
+  In mlir, local variables are represented by `DILocalVariableAttr` which stores information like source location
+  and type. They also require a `DbgDeclareOp` which binds `DILocalVariableAttr` with a location. (e.g. AllocaOp).
 
-  %3 = fir.alloca i32
-  %4:2 = hlfir.declare %3 {uniq_name = "_QFEi"}
+  In FIR, `DeclareOp` has source information about the variable. It also has memref which is like the location
+  for the variable. The `DeclareOp` will be processed in `AddDebugInfoPass` to create `DILocalVariableAttr`. This
+  attr will be attached to the its memref op. 
+  
+  During conversion to LLVM dialect, when a memref op is encountered (e.g. AllocaOp) with a `DILocalVariableAttr`
+  attached, a `DbgDeclareOp` is created which binds the attr with its location. The
+  `DbgDeclareOp` can only be generated here because it requires that memref op has undergone conversion.
+  
+  The change in the IR look like as follows:
+
+  %2 = fir.alloca i32
+  %3 = fir.declare %2 {uniq_name = "_QMhelperFchangeEi"}
 
 
   #di_local_variable = #llvm.di_local_variable<name = "i", line = 20, type = #di_basic_type>
-
   %1 = llvm.alloca %0 x i64
   llvm.intr.dbg.declare #di_local_variable = %1
-  
+
+Arguments
+
+  Arguments works in similar way. But they present a difficulty that DeclareOp's memref points to BlockArgument. We
+  dont handle BlockArgument during conversion to LLVM dialect. For my experiments, I tried to attach to the LoadOp that
+  loads the argument but it is probably not the right solution. I would like suggestions how this can be handled in better way.
+
+
+
 We need to create DILocalVariableAttr which will have all the information about the variable like its type and source
 location. This happens in AddDebugFoundationPass by processing the DeclareOp. Next we need to connect this metadata
 to a value. This can only happen at the time when we convert to llvm-ir dialect as mlir::LLVM::DbgDeclareOp requires
