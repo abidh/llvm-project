@@ -71,31 +71,66 @@ TODO.
 
 Local Variables
   In mlir, local variables are represented by `DILocalVariableAttr` which stores information like source location
-  and type. They also require a `DbgDeclareOp` which binds `DILocalVariableAttr` with a location. (e.g. AllocaOp).
+  and type. They also require a `DbgDeclareOp` which binds `DILocalVariableAttr` with a location.
 
   In FIR, `DeclareOp` has source information about the variable. It also has memref which is like the location
   for the variable. The `DeclareOp` will be processed in `AddDebugInfoPass` to create `DILocalVariableAttr`. This
-  attr will be attached to the its memref op. 
+  attr will be attached to the its memref op (e.g. AllocaOp, AddrOfOp). 
   
-  During conversion to LLVM dialect, when a memref op is encountered (e.g. AllocaOp) with a `DILocalVariableAttr`
+  During conversion to LLVM dialect, when that op is encountered which has a `DILocalVariableAttr`
   attached, a `DbgDeclareOp` is created which binds the attr with its location. The
-  `DbgDeclareOp` can only be generated here because it requires that memref op has undergone conversion.
+  `DbgDeclareOp` can only be generated after types have undergone llvm dialect conversion.
   
   The change in the IR look like as follows:
 
+  original fir
   %2 = fir.alloca i32
   %3 = fir.declare %2 {uniq_name = "_QMhelperFchangeEi"}
 
+  Fir with debug metadata attached.
+  %2 = fir.alloca i32
+  %3 = fir.declare %2 {uniq_name = "_QMhelperFchangeEi"}
 
+  After conversion to llvm dialect
   #di_local_variable = #llvm.di_local_variable<name = "i", line = 20, type = #di_basic_type>
   %1 = llvm.alloca %0 x i64
   llvm.intr.dbg.declare #di_local_variable = %1
 
 Arguments
 
-  Arguments works in similar way. But they present a difficulty that DeclareOp's memref points to BlockArgument. We
-  dont handle BlockArgument during conversion to LLVM dialect. For my experiments, I tried to attach to the LoadOp that
+  Arguments works in similar way. But they present a difficulty that DeclareOp's memref points to BlockArgument. Unlike
+  the op in local variable case, the BlockArgument are not hanlded by the FIRToLLVMLowering
+  We don't handle BlockArgument during conversion to LLVM dialect. For my experiments, I tried to attach to the LoadOp that
   loads the argument but it is probably not the right solution. I would like suggestions how this can be handled in better way.
+
+### Module
+
+Note: Examples below are written in LLVM IR format for ease of discussion. 
+
+In debug metadata, fortran module is represented by DIModule. The variables or function inside module will have scope pointing to the parent module.
+
+1. module helper
+2.   real glr
+3.   ...
+4. end module helper
+
+!1 = !DICompileUnit(language: DW_LANG_Fortran90 ...)
+!2 = !DIModule(scope: !1, name: "helper" ...)
+!3 = !DIGlobalVariable(scope: !2, name: "glr" ...)
+
+Use of a module results in the following metadata.
+!4 = !DIImportedEntity(tag: DW_TAG_imported_module, entity: !2)
+
+Modules are not first class entities in the FIR. So there is no way to get the location where they are
+declared (e.g. Line 1 in the above example.)
+
+But the information that a variable or function is part of a module
+can be extracted from its mangled name alongwith name of the module. There is a GlobalOp generated for each module
+variable in FIR and there is also a DeclareOp in each function where the module variable is used.
+
+I propose that we use the GlobalOp to generate the DIModule and associated DIGlobalVariable. Each DeclareOp entry
+where the module is used will be used to generate DIImportedEntity. Care will be taken to avoid generting duplicate
+DIImportedEntity enries in same function.
 
 
 
@@ -109,41 +144,84 @@ llvm.ptr type. It mean that we need to carry the DILocalVariableAttr somehow til
 
 
 Array variables inside function can point to a global variable outside. Those globals will be ignored while iterating globalOps.
+
+### CommonBlocks
+
+A common block is represented in metadata by `DICommonBlock`. This entity is used by the variable entities as
+scope. `DIExpression` can be used to give the offset of any given variable inside the global storage for
+common block.
+
+integer a, b
+common /test/ a, b
+
+;@test_ = common global [8 x i8] zeroinitializer, !dbg !5, !dbg !6
+!1 = !DISubprogram()
+!2 = !DICommonBlock(scope: !1, name: "test")
+!3 = !DIGlobalVariable(scope: !2, name: "a")
+!4 = !DIExpression()
+!5 = !DIGlobalVariableExpression(var: !3, expr: !4)
+!6 = !DIGlobalVariable(scope: !2, name: "b")
+!7 = !DIExpression(DW_OP_plus_uconst, 4)
+!8 = !DIGlobalVariableExpression(var: !6, expr: !7)
+
+In FIR, a common block results in a `GlobalOp` with common linakge. Every function where the common
+block is used has DeclareOp for the variables. a common block variable will be chain to
+`CoordinateOp` and `AddrOfOp` which will point to the `GlobalOp`. The `CoordinateOp` has the offset
+to the location of this variable in global storage. There is enough information to generate
+the required metadata. Although it requires walking the chain up from DeclaredOp to locate `CoordinateOp`
+and `AddrOfOp`.
+
+Note that currently MLIR does not have any attribute corresponding to `DICommonBlock` so it will have
+to be added.
+
 ### Arrays
 
-The fixed size arrray in the FIR will be represented by DICompositeTypeAttr with a tag value of DW_TAG_array_type.
-Array bounds in each dimension will be represented by DISubrangeAttr. 
+The type of fixed size array is represented in debug metadata as follows:
 
-DICompositeTypeAttr(dwarf::DW_TAG_array_type)
-  list of DISubrangeAttr(list of IntegerAttr for array bounds in that dimensions)
-end
+integer abc(4,5)
+
+!1 = !DISubrange(lowerBound: 1, upperBound: 4)
+!2 = !DISubrange(lowerBound: 1, upperBound: 5)
+!3 = !{ !1, !2 }
+!4 = !DIBasicType(tag: DW_TAG_base_type, name: "integer" ...)
+!5 = !DICompositeType(tag: DW_TAG_array_type, baseType: !4, elements: !3 ...)
 
 DISubrangeAttr in mlir takes IntegerAttr at the moment so only works with fixed sizes arrays. It will need to change to support
 assumed size/rank arrays.
 
-
-Example: TODO
-
 #### Adjustable 
 
-The bounds information in DISubrangeAttr will point to an artificial variable which will hold the runtime
-value of the expression used in the array declaration. I am not sure how 
+The debug metadata for the adjustable array looks similar to fixed sized array with one change. The bounds
+are not constant values but point to a compiler generated variable.
 
-Example; TODO
-#### Assumed Shape
-The assumed shape array will use the similar representation as fixed size array but there will be 2 differences.
-
-1. There will be a DataLocation field whic will be an expression. This will enable debugger to get the data
-pointer from array descriptor. This field is not currently available in DICompositeTypeAttr and may need to be added.
-
-2. The field in DISubrangeAttr for array bounds will be expression which will allow the debugger to get the array bounds
-from descriptor. 
-
-Example: TODO
+The `DeclareOp` in this case points to a `ShapeOp` and we can walk the chain to get the value that represents
+the array bound in som dimension. We will create a compiler-generaed variable that will point to that location
+and that variable will be used in the DISubrange.
 
 #### Assumed Size
 
-It is treated as raw arrays. Debug information will not provide any bounds information.
+This is treated as raw array. Debug information will not provide any bounds information.
+
+#### Assumed Shape
+The assumed shape array will use the similar representation as fixed size array but there will be 2 differences.
+
+1. There will be a DataLocation field which will be an expression. This will enable debugger to get the data
+pointer from array descriptor.
+
+2. The field in DISubrange for array bounds will be expression which will allow the debugger to get the array bounds
+from descriptor. 
+
+integer(4), intent(out) :: a(:,:)
+
+!1 = !DICompositeType(tag: DW_TAG_array_type, baseType: !2, elements: !4, dataLocation: !3)
+!2 = !DIBasicType(tag: DW_TAG_base_type, name: "integer" ...)
+!3 = !DIExpression(DW_OP_push_object_address, DW_OP_deref)
+!4 = !{!6, !8}
+!5 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 32, DW_OP_deref)
+!6 = !DISubrange(lowerBound: !1, upperBound: !5 ...)
+!7 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 32, DW_OP_deref)
+!8 = !DISubrange(lowerBound: !1, upperBound: !8, ...)
+
 
 #### Assumed Rank
 
@@ -205,38 +283,8 @@ the DeclareOp of one variable points to the DeclareOp of another variable (e.g. 
 
 I dont see a way to extract namelist information at the FIR level. 
 
-### CommonBlocks
-
-integer a, b
-common /test/ a, b
-
-fir.global common @test_(dense<0> : vector<8xi8>) : !fir.array<8xi8> loc(#loc1)
-
-  %0 = fir.address_of(@test_) : !fir.ref<!fir.array<8xi8>> loc(#loc3)
-  %1 = fir.convert %0 : (!fir.ref<!fir.array<8xi8>>) -> !fir.ref<!fir.array<?xi8>> loc(#loc3)
-  %c0 = arith.constant 0 : index loc(#loc3)
-  %2 = fir.coordinate_of %1, %c0 : (!fir.ref<!fir.array<?xi8>>, index) -> !fir.ref<i8> loc(#loc3)
-  %3 = fir.convert %2 : (!fir.ref<i8>) -> !fir.ref<i32> loc(#loc3)
-  %4:2 = hlfir.declare %3 {uniq_name = "_QMhelperFmatrixEa"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>) loc(#loc3)
 
 
-A common block generates a GlobalOp that has the storage and then every function where the common block is used has
-DeclareOp for the variable which will point to the global storage through CoordinateOp and AddrOfOp. The debug info will
-have a DICommonBlock in every function where the common block is used. This DICommonBlock will have the variables which will
-point to global storage. Note that currently MLIR does not have any attribute corresponding to DICommonBlock so it will have
-to be added.
-
-;@test_ = common global [8 x i8] zeroinitializer, !dbg !5, !dbg !6
-!1 = !DISubprogram()
-!2 = !DICommonBlock(scope: !1, name: "test")
-!3 = !DIGlobalVariable(scope: !2, name: "a")
-!4 = !DIExpression()
-!5 = !DIGlobalVariableExpression(var: !3, expr: !4)
-!6 = !DIGlobalVariable(scope: !2, name: "b")
-!7 = !DIExpression(DW_OP_plus_uconst, 4)
-!8 = !DIGlobalVariableExpression(var: !6, expr: !7)
-
-### Modules
 
 # Testing
 
