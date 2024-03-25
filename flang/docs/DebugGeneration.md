@@ -11,8 +11,7 @@ generate good debug information.
 We can break the work for debug generation into two separate tasks:
 1) Line Table generation
 2) Full debug generation
-This RFC only deals with the first task of Line Table generation. Full Debug
-generation is left as TODO. The support for Fortran Debug in LLVM
+The support for Fortran Debug in LLVM
 infrastructure[3] has made great progress due to many Fortran frontends adopting
 LLVM as the backend as well as the availability of the Classic Flang compiler.
 
@@ -31,6 +30,12 @@ linetable information. Currently, LLVM IR debug metadata is generated from
 MLIR for a function only if there is a `FusedLoc` with a `SubprogramAttr`[5]
 on  it. A `FusedLoc` is an MLIR Location fused with a metadata. This requires
 that all Function operations in FIR/MLIR have the `FusedLoc`.
+
+There is existing AddDebugFoundationPass which generates generates enough debug
+metadata for function to enable line table information. Although many bits in
+it are hardcoded at the moment.
+
+
 
 I propose that we add a pass that walks over all the Functions and add a 
 `FusedLoc` with `SubprogramAttr`. `SubprogramAttr` requires a few other
@@ -66,7 +71,54 @@ Linetable information will be generated if the following flags are present.
 -gline-tables-only, -g1 : Emit debug line number tables only
 
 ## Full Debug Generation
-TODO.
+
+Full debug information include information about functions, variables, their scopes, types and
+locations. We will generate the debug metadata in the format expected by the LLVM dialect of 
+MLIR. It later gets changed to LLVM's format in DebugTranslation in mlir.
+
+One question that we need to answer is where in flang the debug metadata should be generated. Here
+are the some possible options.
+
+### During conversion to LLVM dialect
+
+Pros:
+1. Some debug metadta entities (e.g. DbgDeclareOp) requires types that are only availble after conversion
+   to LLVM dialect. So those entities could only be generated here.
+2. No chance of missing any change introduced by an earlier transformation.
+
+Cons:
+1. It operates at the Op level so some extra state or global or file scope data will be need to fit various
+things together
+2. DeclareOp is removed before codegen. I try retaining it will this conversion but it amy introduce other
+issues.
+3. Some source information is lost by this point. Examples include information about namelists, source information
+   about field of derived types etc.
+
+### During a pass before conversion to LLVM dialect
+
+This is similar to what AddDebugFoundationPass is currently doing. I propose that this pass should be
+run as late as possible.
+
+Pros:
+1. One central location dedicated to debug information processing. This can result in cleaner implementation.
+2. Similar to above, results of transformation will not be missed.
+
+Cons:
+1. Some bits of the debug metadata can only be generated during conversion to LLVM's dialect. One example is
+   DbgDeclareOP which needs LLVM.Ptr type which is generated in LLVM dialect conversion. So this pass will
+   still require changes in FIRtoLLVM conversion and also needs to pass some data there.
+2. Similar to above, some source data may be lost by this point.
+
+### During Lowering from AST
+
+Pros
+  1. We have complete source information.
+  
+   a
+
+to LLVM's format. While generating debug metadta in  MLIR's LLVM dialect contains many classes which closely resembles classes in LLVM debug metadata infrastructure. An example will be `DILocalVariableAttr` in mlir and `DILocalVariable` in mlir.
+
+AddDebugFoundationPass will be renamed to AddDebugInfoPass.
 ### Variables
 
 Local Variables
@@ -219,9 +271,11 @@ integer(4), intent(out) :: a(:,:)
 !4 = !{!6, !8}
 !5 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 32, DW_OP_deref)
 !6 = !DISubrange(lowerBound: !1, upperBound: !5 ...)
-!7 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 32, DW_OP_deref)
+!7 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 56, DW_OP_deref)
 !8 = !DISubrange(lowerBound: !1, upperBound: !8, ...)
 
+In assumed shape case, the rank can be determined from the type. The expression to get the information from
+the descriptor can easily be built.
 
 #### Assumed Rank
 
@@ -229,9 +283,8 @@ This is currently unsupported in flang. Its representation will be similar to ar
 following difference.
 
 1. DICompositeTypeAttr will have a rank field which will be an expression. It will be used to get the rank value from descriptor.
-2. A new DIGenericSubrangeAttr will be added which will allow to debuggers to calculate bounds in any dimension.
+2. A DIGenericSubrange will be used which will allow debuggers to calculate bounds in any dimension.
 
-Example: TODO
 
 ### Pointers and Allocatables
 The obvious implementation will be to treat them as pointer to a type. Thats how classic flang and gfortran seems to handle them in debug info.
@@ -250,22 +303,23 @@ type = integer(kind=4) (4,5)
 
 The proposal is to keep this behavior in flang.
 
-Debug metadata will also be generated to enable debuggers to find the allocated/associated status of these variables.
+Expressions will be generated to allow debuggers to find the allocated/associated status
+of these variables.
 
 ### Strings
 
 Fixed sized string will be treated like fixed sizes arrays in the debug info. The allocatabe string will be treated like
-like allocatable array with metadata that will enable debuggers to calculate its size.
+like allocatable arrays. Debug metadata will be generated to enable debuggers to calculate its size.
 
   character(len=:), allocatable :: var
   character(len=20) :: fixed
 
-!1 = !DIBasicType(name: "char", size: 8, encoding: DW_ATE_unsigned_char)
-!2 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 8, DW_OP_deref)
-!3 = !DIExpression(DW_OP_push_object_address, DW_OP_deref)
-!4 = !DICompositeType(tag: DW_TAG_array_type, baseType: !1, elements: !5, dataLocation: !3)
-!5 = !DISubrange(count: !2, lowerBound: 1)
-!6 = !DILocalVariable(name: "var", type: !4)
+!1 = !DILocalVariable(name: "var", type: !2)
+!2 = !DICompositeType(tag: DW_TAG_array_type, baseType: !3, elements: !4, dataLocation: !6)
+!3 = !DIBasicType(name: "char", size: 8, encoding: DW_ATE_unsigned_char)
+!4 = !DISubrange(count: !5, lowerBound: 1)
+!5 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 8, DW_OP_deref)
+!6 = !DIExpression(DW_OP_push_object_address, DW_OP_deref)
 
 !7 = !DILocalVariable(name: "fixed", type: !8)
 !8 = !DICompositeType(tag: DW_TAG_array_type, baseType: !1, size: 160, elements: !9)
@@ -282,9 +336,6 @@ the DeclareOp of one variable points to the DeclareOp of another variable (e.g. 
 ### Namelists
 
 I dont see a way to extract namelist information at the FIR level. 
-
-
-
 
 # Testing
 
