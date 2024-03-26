@@ -479,12 +479,19 @@ struct AddrOfOpConversion : public FIROpConversion<fir::AddrOfOp> {
     auto ty = convertType(addr.getType());
     auto llvmAddrOf = rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(
         addr, ty, addr.getSymbol().getRootReference().getValue());
-
-    auto varAttr =
+    if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(addr.getLoc())) {
+      if (auto varAttr =
+            mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(fusedLoc.getMetadata())){
+        rewriter.create<mlir::LLVM::DbgDeclareOp>(
+          llvmAddrOf.getLoc(), llvmAddrOf, varAttr, nullptr);
+      }
+    }
+    /*auto varAttr =
         addr->getAttrOfType<mlir::LLVM::DILocalVariableAttr>("debug");
     if (varAttr)
       rewriter.create<mlir::LLVM::DbgDeclareOp>(llvmAddrOf.getLoc(), llvmAddrOf,
-                                                varAttr, nullptr);
+                                                varAttr, nullptr);*/
+    
 
     return mlir::success();
   }
@@ -599,11 +606,18 @@ struct AllocaOpConversion : public FIROpConversion<fir::AllocaOp> {
     auto llvmAlloc = rewriter.create<mlir::LLVM::AllocaOp>(
         loc, ::getLlvmPtrType(alloc.getContext(), allocaAs), llvmObjectType,
         size);
-    auto varAttr =
+    if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc)) {
+      if (auto varAttr =
+            mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(fusedLoc.getMetadata())){
+        rewriter.create<mlir::LLVM::DbgDeclareOp>(
+              llvmAlloc.getLoc(), llvmAlloc, varAttr, nullptr);
+      }
+    }
+    /*auto varAttr =
         alloc->getAttrOfType<mlir::LLVM::DILocalVariableAttr>("debug");
     if (varAttr)
       rewriter.create<mlir::LLVM::DbgDeclareOp>(llvmAlloc.getLoc(), llvmAlloc,
-                                                varAttr, nullptr);
+                                                varAttr, nullptr);*/
 
     if (alloc.getPinned())
       llvmAlloc->setDiscardableAttr(alloc.getPinnedAttrName(),
@@ -3057,16 +3071,24 @@ struct GlobalOpConversion : public FIROpConversion<fir::GlobalOp> {
                   mlir::ConversionPatternRewriter &rewriter) const override {
     mlir::LLVM::DIGlobalVariableExpressionAttr dbgExpr;
 
-    auto gvAttr =
+    auto loc = global.getLoc();
+    if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc)) {
+      if (auto gvAttr =
+            mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableAttr>(fusedLoc.getMetadata())){
+        dbgExpr = mlir::LLVM::DIGlobalVariableExpressionAttr::get(
+          global.getContext(), gvAttr, mlir::LLVM::DIExpressionAttr());
+      }
+    }
+   /* auto gvAttr =
         global->getAttrOfType<mlir::LLVM::DIGlobalVariableAttr>("debug");
     if (gvAttr)
       dbgExpr = mlir::LLVM::DIGlobalVariableExpressionAttr::get(
-          global.getContext(), gvAttr, mlir::LLVM::DIExpressionAttr());
+          global.getContext(), gvAttr, mlir::LLVM::DIExpressionAttr());*/
 
     auto tyAttr = convertType(global.getType());
     if (auto boxType = mlir::dyn_cast<fir::BaseBoxType>(global.getType()))
       tyAttr = this->lowerTy().convertBoxTypeAsStruct(boxType);
-    auto loc = global.getLoc();
+
     mlir::Attribute initAttr = global.getInitVal().value_or(mlir::Attribute());
     assert(attributeTypeIsCompatible(global.getContext(), initAttr, tyAttr));
     auto linkage = convertLinkage(global.getLinkName());
@@ -3225,11 +3247,18 @@ struct LoadOpConversion : public FIROpConversion<fir::LoadOp> {
       else
         attachTBAATag(loadOp, load.getType(), load.getType(), nullptr);
       rewriter.replaceOp(load, loadOp.getResult());
-      auto varAttr =
+      /*auto varAttr =
           load->getAttrOfType<mlir::LLVM::DILocalVariableAttr>("debug");
       if (varAttr)
         rewriter.create<mlir::LLVM::DbgDeclareOp>(
+            loadOp.getLoc(), loadOp.getAddr(), varAttr, nullptr);*/
+      if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(load.getLoc())) {
+        if (auto varAttr =
+            mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(fusedLoc.getMetadata())){
+          rewriter.create<mlir::LLVM::DbgDeclareOp>(
             loadOp.getLoc(), loadOp.getAddr(), varAttr, nullptr);
+        }
+      }
     }
     return mlir::success();
   }
