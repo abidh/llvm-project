@@ -319,7 +319,7 @@ void AddDebugFoundationPass::handleGlobalOp(fir::GlobalOp globalOp,
   mlir::ModuleOp module = getOperation();
   mlir::MLIRContext *context = &getContext();
   TypeConverter tyConverter(module);
-
+  mlir::OpBuilder builder(context);
   auto result = fir::NameUniquer::deconstruct(globalOp.getSymName());
   // TODO: Use module information from the 'result' if available
   auto diType =
@@ -331,7 +331,8 @@ void AddDebugFoundationPass::handleGlobalOp(fir::GlobalOp globalOp,
       mlir::StringAttr::get(context, globalOp.getName()), fileAttr,
       getLineFromLoc(globalOp.getLoc()), diType, /*isLocalToUnit*/ true,
       /*isDefinition*/ true, /* alignInBits*/ 0);
-  globalOp->setAttr("debug", gvAttr);
+  //globalOp->setAttr("debug", gvAttr);
+  globalOp->setLoc(builder.getFusedLoc({globalOp->getLoc()}, gvAttr));
 }
 
 void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
@@ -342,7 +343,7 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
   mlir::ModuleOp module = getOperation();
   mlir::MLIRContext *context = &getContext();
   TypeConverter tyConverter(module);
-
+  mlir::OpBuilder builder(context);
   auto refOp = declOp.getMemref();
   bool isLocal = (refOp.getDefiningOp() != nullptr);
   auto diType =
@@ -356,6 +357,7 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
 
   if (isLocal) {
     refOp.getDefiningOp()->setAttr("debug", localVarAttr);
+    refOp.getDefiningOp()->setLoc(builder.getFusedLoc({refOp.getDefiningOp()->getLoc()}, localVarAttr));
     /*mlir::OpBuilder builder(context);
     builder.create<mlir::LLVM::DbgDeclareOp>(declOp.getLoc(), refOp,
                                                 localVarAttr, nullptr);*/
@@ -372,6 +374,7 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
         if (loadOp.getMemref() == declOp) {
           done = true;
           loadOp->setAttr("debug", localVarAttr);
+          loadOp->setLoc(builder.getFusedLoc({loadOp->getLoc()}, localVarAttr));
         }
       });
     }
