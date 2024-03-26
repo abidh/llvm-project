@@ -356,19 +356,20 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
       /* alignInBits*/ 0, diType);
 
   if (isLocal) {
-    refOp.getDefiningOp()->setAttr("debug", localVarAttr);
+    //refOp.getDefiningOp()->setAttr("debug", localVarAttr);
     refOp.getDefiningOp()->setLoc(builder.getFusedLoc({refOp.getDefiningOp()->getLoc()}, localVarAttr));
     /*mlir::OpBuilder builder(context);
     builder.create<mlir::LLVM::DbgDeclareOp>(declOp.getLoc(), refOp,
                                                 localVarAttr, nullptr);*/
   } else {
     if (auto arg = mlir::dyn_cast_or_null<mlir::BlockArgument>(refOp)) {
-      bool done = false;
+      arg.setLoc(builder.getFusedLoc({arg.getLoc()}, localVarAttr));
+      //bool done = false;
       //funcOp.setArgAttr(arg.getArgNumber(),"debug", localVarAttr);
       //funcOp.dump();
       // find the LoadOp that loads the block argument and attach local
       // variable attribute to it.
-      funcOp.walk([&](fir::LoadOp loadOp) {
+      /*funcOp.walk([&](fir::LoadOp loadOp) {
         if (done)
           return;
         if (loadOp.getMemref() == declOp) {
@@ -376,7 +377,7 @@ void AddDebugFoundationPass::handleDeclareOp(fir::DeclareOp declOp,
           loadOp->setAttr("debug", localVarAttr);
           loadOp->setLoc(builder.getFusedLoc({loadOp->getLoc()}, localVarAttr));
         }
-      });
+      });*/
     }
   }
 }

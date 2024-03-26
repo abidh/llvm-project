@@ -4048,6 +4048,24 @@ public:
       signalPassFailure();
     }
 
+    mod.walk([&](mlir::LLVM::LLVMFuncOp funcOp) {
+      //auto b = funcOp.getBlocks().front();
+      llvm::errs() << funcOp.getName() << " " << funcOp.getNumArguments() << "\n---------------------\n";
+      if (funcOp.getBlocks().size() > 0) {
+        mlir::OpBuilder builder(context);
+        builder.setInsertionPointToStart(&(funcOp.getBlocks().front()));
+        for (auto a : funcOp.getBlocks().front().getArguments()) {
+          if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(a.getLoc())) {
+            if (auto varAttr =
+              mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(fusedLoc.getMetadata())){
+              builder.create<mlir::LLVM::DbgDeclareOp>(
+                a.getLoc(), a, varAttr, nullptr);
+            }
+          }
+        }
+      }
+    });
+
     // Run pass to add comdats to functions that have weak linkage on relevant platforms
     if (fir::getTargetTriple(mod).supportsCOMDAT()) {
       mlir::OpPassManager comdatPM("builtin.module");
