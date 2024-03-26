@@ -11,160 +11,162 @@ generate good debug information.
 We can break the work for debug generation into two separate tasks:
 1) Line Table generation
 2) Full debug generation
-The support for Fortran Debug in LLVM
-infrastructure[3] has made great progress due to many Fortran frontends adopting
-LLVM as the backend as well as the availability of the Classic Flang compiler.
+The support for Fortran Debug in LLVM infrastructure[3] has made great progress
+due to many Fortran frontends adopting LLVM as the backend as well as the
+availability of the Classic Flang compiler.
 
+### Driver Flags
+By default, Flang will not generate any debug or linetable information.
+Debug information will be generated if the following flags are present.
+-gline-tables-only, -g1 : Emit debug line number tables only
+-g : Emit full debug info
 
 ## Line Table Generation
 
-While the recent MLIR change provides a way for frontends to generate debug,
-it disabled the default generation of line table information[4]. Line number
-information is useful for setting breakpoints in the debugger and also
-for generating stacktrace, performance profiles and optimization reports
-from the LLVM Optimizer. Hence, it is important that we enable support for it.
+There is existing AddDebugFoundationPass which add `FusedLoc` with a
+`SubprogramAttr` on FuncOp. This allows MLIR to generate LLVM IR metadata
+for that function. Following values in that hardcoded which will either need to
+be calculated or passed from the driver.
 
-In MLIR, every operation has a source location. Presence of location information
-on all operations makes available the information needed  to generate the
-linetable information. Currently, LLVM IR debug metadata is generated from
-MLIR for a function only if there is a `FusedLoc` with a `SubprogramAttr`[5]
-on  it. A `FusedLoc` is an MLIR Location fused with a metadata. This requires
-that all Function operations in FIR/MLIR have the `FusedLoc`.
-
-There is existing AddDebugFoundationPass which generates generates enough debug
-metadata for function to enable line table information. Although many bits in
-it are hardcoded at the moment.
-
-
-
-I propose that we add a pass that walks over all the Functions and add a 
-`FusedLoc` with `SubprogramAttr`. `SubprogramAttr` requires a few other
-attributes like `CompileUnitAttr`, `FileAttr`, `SubroutineTypeAttr` etc.
-The basic information that is required for creating these attributes are
-the following:
-- Location of the source file (name and directory). This information can be
-passed by the driver.
-- Details of the compiler (name and version and git hash). This information
-can be passed by the driver.
+- Location of the source file (name and directory).
+- Details of the compiler (name and version and git hash).
 - Language Standard. We can set it to Fortran95 for now and periodically
 revise it when full support for later standards is available.
-- Optimisation Level. This information can be passed by the driver.
-- Type of debug generated (linetable/full debug). This information can be
-passed by the driver based on the flags used.
-- Name of the function. Available on the operation itself.
+- Optimisation Level.
+- Type of debug generated (linetable/full debug).
 - Calling Convention: `DW_CC_normal` by default and `DW_CC_program` if it is
 the main program.
-- The source level types (arguments and return) of the subroutine/function.
-
-The pass is prototyped in https://reviews.llvm.org/D137956. Alternative
-implementation choice includes adding the `FusedLoc` info during lowering to
-FIR or alternatively during the FIRToLLVMConversion pass. The former will
-miss any outlined functions that are created by FIR transformation passes.
-The latter only operates at the Operation level and hence might not be
-suitable for creating Module level information like `CompileUnitAttr`. Also,
-the presence of the relevant Module level attribute and `SubroutineAttr`
-can be used for generating further debug info during the conversion to LLVM.
-
-###Â Driver Flags
-By default, Flang will not generate any debug or linetable information.
-Linetable information will be generated if the following flags are present.
--gline-tables-only, -g1 : Emit debug line number tables only
+- Subroutine type.
 
 ## Full Debug Generation
 
-Full debug information include information about functions, variables, their scopes, types and
-locations. We will generate the debug metadata in the format expected by the LLVM dialect of 
-MLIR. It later gets changed to LLVM's format in DebugTranslation in mlir.
+Full debug info will include metadata to describe functions, variables and
+types apart from line table. Flang will generate debug metadata in the format
+expected by the LLVM dialect of  MLIR. It later gets changed to format of
+LLVM IR by DebugTranslation in mlir.
 
-One question that we need to answer is where in flang the debug metadata should be generated. Here
-are the some possible options.
+Debug metadata generation will happen in 2 steps.
+
+1. Debug metadata is generated by reading information from AST or FIR. This step can
+happen anytime before or during conversion to LLVM dialect. An example of
+the metadata generated in this step will be `DILocalVariableAttr` or
+` DIDerivedTypeAttr`.
+
+2. Changes that can only happen during or after conversion to LLVM dialect. The example
+of this will be passing `DIGlobalVariableExpressionAttr` while
+creating `LLVM::GlobalOp`. Another example will be generation of `DbgDeclareOp`
+that is required for local variables. It can only be created after conversion to
+LLVM dialect as it requires LLVM.Ptr type. The changes required for step 2 are quite
+minimal. The bulk of the work happens in step 1.
+
+One design decision that we need to make is to decide where to perform step 1.
+Here are some possible options:
 
 ### During conversion to LLVM dialect
 
 Pros:
-1. Some debug metadta entities (e.g. DbgDeclareOp) requires types that are only availble after conversion
-   to LLVM dialect. So those entities could only be generated here.
+1. Do step 1 and 2 in one place.
 2. No chance of missing any change introduced by an earlier transformation.
 
 Cons:
-1. It operates at the Op level so some extra state or global or file scope data will be need to fit various
-things together
-2. DeclareOp is removed before codegen. I try retaining it will this conversion but it amy introduce other
-issues.
-3. Some source information is lost by this point. Examples include information about namelists, source information
-   about field of derived types etc.
+1. It operates at the Op level so generating `CompileUnitAttr` and `DISubprogramAttr` and passing them
+around may be an issue. 
+2. DeclareOp is removed before codegen.
+3. As conversion to LVMM dialect runs, the ordering may present some difficulties.
+By the time, `DeclareOp` is processed, the earlier ops on which it was depending on
+have been converted to LLVM dialect. Doing everything here may not be as straight forward
+as it seems.
+4. Some source information is lost by this point. Examples include information about
+namelists, source line information about field of derived types etc.
 
 ### During a pass before conversion to LLVM dialect
 
-This is similar to what AddDebugFoundationPass is currently doing. I propose that this pass should be
-run as late as possible.
+This is similar to what AddDebugFoundationPass is currently doing. This seems the best option to me.
 
 Pros:
-1. One central location dedicated to debug information processing. This can result in cleaner implementation.
-2. Similar to above, results of transformation will not be missed.
+1. One central location dedicated to debug information processing. This can result in a cleaner implementation.
+2. Results of transformations will not be missed.
 
 Cons:
-1. Some bits of the debug metadata can only be generated during conversion to LLVM's dialect. One example is
-   DbgDeclareOP which needs LLVM.Ptr type which is generated in LLVM dialect conversion. So this pass will
-   still require changes in FIRtoLLVM conversion and also needs to pass some data there.
-2. Similar to above, some source data may be lost by this point.
+1. Step 2 still need to happen during conversion to LLVM dialect. But changes required for step 2 are quite minimal.
+2. Similar to above, some source information may be lost by this point.
 
 ### During Lowering from AST
 
 Pros
-  1. We have complete source information.
+1. We have complete source information.
+
+Cons:
+1. There may be changed int the code after lowering which may not be reflected in debed information.
+2. It may need to touch a lot of places of lowerig code increasing complexity and fragility.
   
-   a
+### Design
 
-to LLVM's format. While generating debug metadta in  MLIR's LLVM dialect contains many classes which closely resembles classes in LLVM debug metadata infrastructure. An example will be `DILocalVariableAttr` in mlir and `DILocalVariable` in mlir.
+The AddDebugFoundationPass will be renamed to AddDebugInfo Pass. The information mentioned in the line info
+section above will be passed to it from the driver. This pass will run quite late in the pipeline but before
+`DecalreOp` is removed.
 
-AddDebugFoundationPass will be renamed to AddDebugInfoPass.
+In this pass, we will iterate through the GloablOp, TypeInfoOp and DeclareOp to extract the source information
+and build the metadata. A class will be added to handle coversion of MLIR and FIR types to DITypeAttr expected
+by the mlir.
+
+Following section provide details of how various language constructs will be handled. The example are mostly
+written in LLVM IR format. MLIR and LLVM IR debug metadata is quite similar, so this should not pose a problem
+in understanding.
+
+
 ### Variables
 
-Local Variables
+#### Local Variables
   In mlir, local variables are represented by `DILocalVariableAttr` which stores information like source location
   and type. They also require a `DbgDeclareOp` which binds `DILocalVariableAttr` with a location.
 
   In FIR, `DeclareOp` has source information about the variable. It also has memref which is like the location
   for the variable. The `DeclareOp` will be processed in `AddDebugInfoPass` to create `DILocalVariableAttr`. This
-  attr will be attached to the its memref op (e.g. AllocaOp, AddrOfOp). 
+  attr is attached to the memref op using a `FusedLoc`.
   
-  During conversion to LLVM dialect, when that op is encountered which has a `DILocalVariableAttr`
-  attached, a `DbgDeclareOp` is created which binds the attr with its location. The
-  `DbgDeclareOp` can only be generated after types have undergone llvm dialect conversion.
+  During conversion to LLVM dialect, when an op is encountered that has a `DILocalVariableAttr` in its `FusedLoc`,
+  a `DbgDeclareOp` is created which binds the attr with its location. The  `DbgDeclareOp` can only be
+  generated after types have undergone llvm dialect conversion.
   
   The change in the IR look like as follows:
 
+```
   original fir
-  %2 = fir.alloca i32
+  %2 = fir.alloca i32  loc(#loc4)
   %3 = fir.declare %2 {uniq_name = "_QMhelperFchangeEi"}
 
-  Fir with debug metadata attached.
-  %2 = fir.alloca i32
+  Fir with FusedLoc.
+
+  %2 = fir.alloca i32  loc(#loc38)
   %3 = fir.declare %2 {uniq_name = "_QMhelperFchangeEi"}
+  #di_local_variable5 = #llvm.di_local_variable<name = "i", line = 5, type = #di_basic_type ... >
+  #loc38 = loc(fused<#di_local_variable5>[#loc4])
 
   After conversion to llvm dialect
-  #di_local_variable = #llvm.di_local_variable<name = "i", line = 20, type = #di_basic_type>
+
+  #di_local_variable = #llvm.di_local_variable<name = "i", line = 5, type = #di_basic_type ...>
   %1 = llvm.alloca %0 x i64
   llvm.intr.dbg.declare #di_local_variable = %1
+```
 
-Arguments
+#### Arguments
 
   Arguments works in similar way. But they present a difficulty that DeclareOp's memref points to BlockArgument. Unlike
-  the op in local variable case, the BlockArgument are not hanlded by the FIRToLLVMLowering
-  We don't handle BlockArgument during conversion to LLVM dialect. For my experiments, I tried to attach to the LoadOp that
-  loads the argument but it is probably not the right solution. I would like suggestions how this can be handled in better way.
-
+  the op in local variable case, the BlockArgument are not hanlded by the FIRToLLVMLowering. This can easily be handled by
+  adding a pass that runs after conversion to LLVM dialect. This pass looks at the block arguments for all the functions
+  and generates `DbgDeclareOp` where needed.
+ 
 ### Module
 
-Note: Examples below are written in LLVM IR format for ease of discussion. 
+In debug metadata, fortran module is represented by DIModule. The variables or function inside module will
+have scope pointing to the parent module.
 
-In debug metadata, fortran module is represented by DIModule. The variables or function inside module will have scope pointing to the parent module.
-
-1. module helper
-2.   real glr
-3.   ...
-4. end module helper
+```
+module helper
+   real glr
+   ...
+end module helper
 
 !1 = !DICompileUnit(language: DW_LANG_Fortran90 ...)
 !2 = !DIModule(scope: !1, name: "helper" ...)
@@ -172,6 +174,7 @@ In debug metadata, fortran module is represented by DIModule. The variables or f
 
 Use of a module results in the following metadata.
 !4 = !DIImportedEntity(tag: DW_TAG_imported_module, entity: !2)
+```
 
 Modules are not first class entities in the FIR. So there is no way to get the location where they are
 declared (e.g. Line 1 in the above example.)
@@ -180,29 +183,17 @@ But the information that a variable or function is part of a module
 can be extracted from its mangled name alongwith name of the module. There is a GlobalOp generated for each module
 variable in FIR and there is also a DeclareOp in each function where the module variable is used.
 
-I propose that we use the GlobalOp to generate the DIModule and associated DIGlobalVariable. Each DeclareOp entry
-where the module is used will be used to generate DIImportedEntity. Care will be taken to avoid generting duplicate
-DIImportedEntity enries in same function.
-
-
-
-We need to create DILocalVariableAttr which will have all the information about the variable like its type and source
-location. This happens in AddDebugFoundationPass by processing the DeclareOp. Next we need to connect this metadata
-to a value. This can only happen at the time when we convert to llvm-ir dialect as mlir::LLVM::DbgDeclareOp requires
-llvm.ptr type. It mean that we need to carry the DILocalVariableAttr somehow till we can use it.
-
-  auto localVarAttr = mlir::LLVM::DILocalVariableAttr::get(...);
-  declOp.getMemref().getDefiningOp()->setAttr("debug", localVarAttr);
-
-
-Array variables inside function can point to a global variable outside. Those globals will be ignored while iterating globalOps.
+We will use the `GlobalOp` to generate the DIModule and associated DIGlobalVariable. Each `DeclareOp` entry
+where the module is used will be used to generate `DIImportedEntity`. Care will be taken to avoid generting duplicate
+`DIImportedEntity` enries in same function.
 
 ### CommonBlocks
 
-A common block is represented in metadata by `DICommonBlock`. This entity is used by the variable entities as
+A common block is represented in metadata by `DICommonBlock`. This entity is used by the variable as
 scope. `DIExpression` can be used to give the offset of any given variable inside the global storage for
 common block.
 
+```
 integer a, b
 common /test/ a, b
 
@@ -215,21 +206,20 @@ common /test/ a, b
 !6 = !DIGlobalVariable(scope: !2, name: "b")
 !7 = !DIExpression(DW_OP_plus_uconst, 4)
 !8 = !DIGlobalVariableExpression(var: !6, expr: !7)
+```
 
 In FIR, a common block results in a `GlobalOp` with common linakge. Every function where the common
-block is used has DeclareOp for the variables. a common block variable will be chain to
-`CoordinateOp` and `AddrOfOp` which will point to the `GlobalOp`. The `CoordinateOp` has the offset
-to the location of this variable in global storage. There is enough information to generate
-the required metadata. Although it requires walking the chain up from DeclaredOp to locate `CoordinateOp`
-and `AddrOfOp`.
-
-Note that currently MLIR does not have any attribute corresponding to `DICommonBlock` so it will have
-to be added.
+block is used has `DeclareOp` for that variables  in the common block. This `DeclareOp` will point
+to gloabl storage through `CoordinateOp` and `AddrOfOp`. The `CoordinateOp` has the offset of the
+location of this variable in global storage. There is enough information to generate
+the required metadata. Although it requires walking the chain up from `DeclaredOp` to locate
+`CoordinateOp` and `AddrOfOp`.
 
 ### Arrays
 
 The type of fixed size array is represented in debug metadata as follows:
 
+```
 integer abc(4,5)
 
 !1 = !DISubrange(lowerBound: 1, upperBound: 4)
@@ -237,9 +227,7 @@ integer abc(4,5)
 !3 = !{ !1, !2 }
 !4 = !DIBasicType(tag: DW_TAG_base_type, name: "integer" ...)
 !5 = !DICompositeType(tag: DW_TAG_array_type, baseType: !4, elements: !3 ...)
-
-DISubrangeAttr in mlir takes IntegerAttr at the moment so only works with fixed sizes arrays. It will need to change to support
-assumed size/rank arrays.
+```
 
 #### Adjustable 
 
@@ -247,7 +235,7 @@ The debug metadata for the adjustable array looks similar to fixed sized array w
 are not constant values but point to a compiler generated variable.
 
 The `DeclareOp` in this case points to a `ShapeOp` and we can walk the chain to get the value that represents
-the array bound in som dimension. We will create a compiler-generaed variable that will point to that location
+the array bound in any dimension. We will create a compiler-generaed variable that will point to that location
 and that variable will be used in the DISubrange.
 
 #### Assumed Size
@@ -263,6 +251,7 @@ pointer from array descriptor.
 2. The field in DISubrange for array bounds will be expression which will allow the debugger to get the array bounds
 from descriptor. 
 
+```
 integer(4), intent(out) :: a(:,:)
 
 !1 = !DICompositeType(tag: DW_TAG_array_type, baseType: !2, elements: !4, dataLocation: !3)
@@ -273,6 +262,7 @@ integer(4), intent(out) :: a(:,:)
 !6 = !DISubrange(lowerBound: !1, upperBound: !5 ...)
 !7 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 56, DW_OP_deref)
 !8 = !DISubrange(lowerBound: !1, upperBound: !8, ...)
+```
 
 In assumed shape case, the rank can be determined from the type. The expression to get the information from
 the descriptor can easily be built.
@@ -282,13 +272,14 @@ the descriptor can easily be built.
 This is currently unsupported in flang. Its representation will be similar to array representation for asumed shape array with the
 following difference.
 
-1. DICompositeTypeAttr will have a rank field which will be an expression. It will be used to get the rank value from descriptor.
-2. A DIGenericSubrange will be used which will allow debuggers to calculate bounds in any dimension.
+1. `DICompositeTypeAttr` will have a rank field which will be an expression. It will be used to get the rank value from descriptor.
+2. A `DIGenericSubrange` will be used which will allow debuggers to calculate bounds in any dimension.
 
 
 ### Pointers and Allocatables
 The obvious implementation will be to treat them as pointer to a type. Thats how classic flang and gfortran seems to handle them in debug info.
 
+```
 integer, pointer :: pt
 (GDB) ptype pt
 type = PTR TO -> ( integer(kind=4) )
@@ -300,6 +291,7 @@ integer, target :: array(4,5)
 pa => array
 (gdb) ptype pa
 type = integer(kind=4) (4,5)
+```
 
 The proposal is to keep this behavior in flang.
 
@@ -311,6 +303,7 @@ of these variables.
 Fixed sized string will be treated like fixed sizes arrays in the debug info. The allocatabe string will be treated like
 like allocatable arrays. Debug metadata will be generated to enable debuggers to calculate its size.
 
+```
   character(len=:), allocatable :: var
   character(len=20) :: fixed
 
@@ -324,6 +317,7 @@ like allocatable arrays. Debug metadata will be generated to enable debuggers to
 !7 = !DILocalVariable(name: "fixed", type: !8)
 !8 = !DICompositeType(tag: DW_TAG_array_type, baseType: !1, size: 160, elements: !9)
 !9 = !DISubrange(count: 20, lowerBound: 1)
+```
 
 ### Derived Types
 TypeInfoOp can be iterated to get the list of all the derived type. It currently lack the location and offsets of the members which will have to beadded either in TypeInfoOp or RecordType/FieldType.
@@ -336,6 +330,15 @@ the DeclareOp of one variable points to the DeclareOp of another variable (e.g. 
 ### Namelists
 
 I dont see a way to extract namelist information at the FIR level. 
+
+### Missing metadata in MLIR
+Note that currently MLIR does not have any attribute corresponding to `DICommonBlock` so it will have
+to be added.
+
+DISubrangeAttr in mlir takes IntegerAttr at the moment so only works with fixed sizes arrays. It will need to change to support
+assumed size/rank arrays.
+
+`DIGenericSubrange`
 
 # Testing
 
