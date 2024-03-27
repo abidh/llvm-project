@@ -1,11 +1,5 @@
 # Debug Generation
 
-```{contents}
----
-local:
----
-```
-
 Application developers spend a significant time debugging the applications that
 they create. Hence it is important that a compiler provide support for a good
 debug experience. DWARF[1] is the standard debugging file format used by
@@ -24,7 +18,8 @@ availability of the Classic Flang compiler.
 ## Driver Flags
 By default, Flang will not generate any debug or linetable information.
 Debug information will be generated if the following flags are present.
--gline-tables-only, -g1 : Emit debug line number tables only
+
+-gline-tables-only, -g1 : Emit debug line number tables only  
 -g : Emit full debug info
 
 ## Line Table Generation
@@ -399,7 +394,24 @@ variable (e.g. a => b).
 
 ### Namelists
 
-I dont see a way to extract namelist information at the FIR level. 
+FIR does not seem to have a way to extract information about namelists. We
+will need to find a way to add this information in.
+
+```
+namelist /abc/ x3, y3
+
+(gdb) p abc
+$1 = ( x3 = 100, y3 = 500 )
+(gdb) p x3
+$2 = 100
+(gdb) p y3
+$3 = 500
+```
+
+Even without namelist support, we should be able to see the value of the
+individual variables like `x3` and `y3` in above example. But we would not
+be able to evaluate namelist and have debugger prints the value of all the
+variables in it.
 
 ## Missing metadata in MLIR
 
