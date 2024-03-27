@@ -121,10 +121,10 @@ and `DeclareOp` to extract the source information and build the mlir
 attributes. A class will be added to handle coversion of MLIR and FIR types to
 `DITypeAttr` as expected by the mlir.
 
-Following section provide details of how various language constructs will be
-handled. The example are mostly written in LLVM IR format. MLIR and LLVM IR
-debug metadata is quite similar, so this should not pose a problem in
-understanding.
+Following sections provide details of how various language constructs will be
+handled. In these sections, the LLVM IR metadata and mlir attributes have been
+used interchangeably. As an example, `DILocalVariableAttr` is an mlir attribute
+which gets translate to LLVM IR's `DILocalVariable`.
 
 ### Variables
 
@@ -162,7 +162,7 @@ understanding.
   llvm.intr.dbg.declare #di_local_variable = %1
 ```
 
-#### Arguments
+#### Function Arguments
 
 Arguments works in similar way. But they present a difficulty that `DeclareOp`'s
 memref points to `BlockArgument`. Unlike the op in local variable case,
@@ -198,10 +198,10 @@ can be extracted from its mangled name alongwith name of the module. There is
 a `GlobalOp` generated for each module variable in FIR and there is also a
 `DeclareOp` in each function where the module variable is used.
 
-We will use the `GlobalOp` to generate the `DIModule` and associated
-`DIGlobalVariable`. Each `DeclareOp` entry where the module is used will be used
-to generate `DIImportedEntity`. Care will be taken to avoid generting duplicate
-`DIImportedEntity` enries in same function.
+We will use the `GlobalOp` to generate the `DIModuleAttr` and associated
+`DIGlobalVariableAttr`. Each `DeclareOp` entry where the module is used will be used
+to generate `DIImportedEntityAttr`. Care will be taken to avoid generting duplicate
+`DIImportedEntityAttr` enries in same function.
 
 ### Derived Types
 
@@ -283,12 +283,12 @@ integer abc(4,5)
 #### Adjustable 
 
 The debug metadata for the adjustable array looks similar to fixed sized array
-with one change. The bounds are not constant values but point to a compiler
-generated variable.
+with one change. The bounds are not constant values but point to a
+`DILocalVariableAttr`.
 
-IN FIR, the `DeclareOp` points to a `ShapeOp` and we can walk the chain
+In FIR, the `DeclareOp` points to a `ShapeOp` and we can walk the chain
 to get the value that represents the array bound in any dimension. We will
-create a compiler-generaed variable that will point to that location. This
+create a `DILocalVariableAttr` that will point to that location. This
 variable will be used in the `DISubrangeAttr`.
 
 #### Assumed Size
@@ -329,7 +329,7 @@ array representation for asumed shape array with the following difference.
 
 1. `DICompositeTypeAttr` will have a rank field which will be an expression.
 It will be used to get the rank value from descriptor.
-2. Instead of `DISubrangeType` for each dimension, there will be
+2. Instead of `DISubrangeType` for each dimension, there will be a single
 `DIGenericSubrange` which will allow debuggers to calculate bounds in any
 dimension.
 
@@ -394,8 +394,7 @@ variable (e.g. a => b).
 
 ### Namelists
 
-FIR does not seem to have a way to extract information about namelists. We
-will need to find a way to add this information in.
+FIR does not seem to have a way to extract information about namelists.
 
 ```
 namelist /abc/ x3, y3
@@ -409,9 +408,9 @@ $3 = 500
 ```
 
 Even without namelist support, we should be able to see the value of the
-individual variables like `x3` and `y3` in above example. But we would not
-be able to evaluate namelist and have debugger prints the value of all the
-variables in it.
+individual variables like `x3` and `y3` in the above example. But we would not
+be able to evaluate the namelist and have the debugger prints the value of all
+the variables in it as shown above for `abc`.
 
 ## Missing metadata in MLIR
 
