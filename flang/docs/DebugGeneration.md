@@ -1,5 +1,11 @@
 # Debug Generation
 
+```{contents}
+---
+local:
+---
+```
+
 Application developers spend a significant time debugging the applications that
 they create. Hence it is important that a compiler provide support for a good
 debug experience. DWARF[1] is the standard debugging file format used by
@@ -25,9 +31,8 @@ Debug information will be generated if the following flags are present.
 
 There is existing AddDebugFoundationPass which add `FusedLoc` with a
 `SubprogramAttr` on FuncOp. This allows MLIR to generate LLVM IR metadata
-for that function. This results in the correct line table entries being
-generated. However, following values in that code are hardcoded which will
-either need to be calculated or passed from the driver.
+for that function. However, following values in that code are hardcoded which
+will either need to be calculated or passed from the driver.
 
 - Details of the compiler (name and version and git hash).
 - Language Standard. We can set it to Fortran95 for now and periodically
@@ -41,9 +46,8 @@ the main program.
 ## Full Debug Generation
 
 Full debug info will include metadata to describe functions, variables and
-types apart from line table. Flang will generate debug metadata in the form
-of  MLIR attributes. It later gets changed to format of LLVM IR by
-DebugTranslation [4] in mlir.
+types. Flang will generate debug metadata in the form of MLIR attributes. These
+attributes get changed to format of LLVM IR by DebugTranslation[4].
 
 Debug metadata generation will happen in 2 steps.
 
@@ -71,11 +75,11 @@ Pros:
 Cons:
 1. It operates at the Op level so generating `CompileUnitAttr` and
 `DISubprogramAttr` and passing them around may be an issue. 
-2. DeclareOp is removed before codegen.
-3. As conversion to LVMM dialect runs, the ordering may present some
-difficulties. By the time, `DeclareOp` is processed, the earlier ops on which
-it was depending on have been converted to LLVM dialect. Doing everything here
-may not be as straight forward as it seems.
+2. `DeclareOp` is removed before codegen.
+3. Even if `DeclareOp` is retained, creating debug metadata while some ops have
+been coverted to LLVMdialect and others are not may cause its own issues. We
+need to walk the ops chain to extract the information which may be problematic
+in this case.
 4. Some source information is lost by this point. Examples include
 information about namelists, source line information about field of derived
 types etc.
@@ -88,7 +92,8 @@ the best option to me.
 Pros:
 1. One central location dedicated to debug information processing. This can
 result in a cleaner implementation.
-2. Results of transformations will not be missed.
+2. Similar to above, less chance of missing any change introduced by an earlier
+transformation.
 
 Cons:
 1. Step 2 still need to happen during conversion to LLVM dialect. But
@@ -102,15 +107,14 @@ Pros
 
 Cons:
 1. There may be changed int the code after lowering which may not be
-reflected in debed information.
-2. It may need to touch a lot of places of lowerig code increasing
-complexity and fragility.
+reflected in debeg information.
+2. Comments on an earlier PR [5] advised against this approach.
   
 ## Design
 
 The design below assumes that we are extracting the information from FIR.
-If we decide to go with the AST then this part will beed to change. Although
-the metadta that we need to generate remains the same.
+If we decide to go with the AST then this part will need to change. Although
+the metadta that we generate remains the same.
 
 The AddDebugFoundationPass will be renamed to AddDebugInfo Pass. The
 information mentioned in the line info section above will be passed to it from
@@ -118,9 +122,9 @@ the driver. This pass will run quite late in the pipeline but before
 `DecalreOp` is removed.
 
 In this pass, we will iterate through the `GloablOp`, `TypeInfoOp`, `FuncOp`
-and `DeclareOp` to extract the source information and build the metadata. A
-class will be added to handle coversion of MLIR and FIR types to `DITypeAttr`
-expected by the mlir.
+and `DeclareOp` to extract the source information and build the mlir
+attributes. A class will be added to handle coversion of MLIR and FIR types to
+`DITypeAttr` as expected by the mlir.
 
 Following section provide details of how various language constructs will be
 handled. The example are mostly written in LLVM IR format. MLIR and LLVM IR
@@ -134,10 +138,9 @@ understanding.
   stores information like source location and type. They also require a
   `DbgDeclareOp` which binds `DILocalVariableAttr` with a location.
 
-  In FIR, `DeclareOp` has source information about the variable. It also has
-  memref which is like the location for the variable. The `DeclareOp` will
-  be processed in `AddDebugInfoPass` to create `DILocalVariableAttr`. This
-  attr is attached to the memref op using a `FusedLoc`.
+  In FIR, `DeclareOp` has source information about the variable. The
+  `DeclareOp` will be processed to create `DILocalVariableAttr`. This attr is
+  attached to the memref op of the `DeclareOp` using a `FusedLoc` approach.
   
   During conversion to LLVM dialect, when an op is encountered that has a
   `DILocalVariableAttr` in its `FusedLoc`, a `DbgDeclareOp` is created which
@@ -224,11 +227,11 @@ A derived type is represented in metadata by `DICompositeType` with a tag of
 ```
 
 In FIR, RecordType and TypeInfoOp can be used to get information about the
-types of the component and location of the derived type. There are still some
-open questions about derived types.
+types of the component and location of the derived type. However, there are
+still some open questions about derived types.
 
-1. What is the correct way to get the offset and alignment information for any
-member of the derived type.
+1. What is the correct way to get the offset and alignment information for the
+members of the derived type.
 
 2. Use of derived type causes the generation of many other global variables.
 Do they need to be retained in debug info?
@@ -259,16 +262,17 @@ common /test/ a, b
 ```
 
 In FIR, a common block results in a `GlobalOp` with common linakge. Every
-function where the common block is used has `DeclareOp` for that variables in
-the common block. This `DeclareOp` will point to gloabl storage through
+function where the common block is used has `DeclareOp` for that variables.
+This `DeclareOp` will point to gloabl storage through
 `CoordinateOp` and `AddrOfOp`. The `CoordinateOp` has the offset of the
 location of this variable in global storage. There is enough information to
-generate the required metadata. Although it requires walking the chain up from
+generate the required metadata. Although it requires walking up the chain from
 `DeclaredOp` to locate `CoordinateOp` and `AddrOfOp`.
 
 ### Arrays
 
-The type of fixed size array is represented in debug metadata as follows:
+The type of fixed size array is represented using `DICompositeType`. The
+`DISubrangeAttr` is used to provide bounds in any given dimensions.
 
 ```
 integer abc(4,5)
@@ -290,7 +294,7 @@ generated variable.
 IN FIR, the `DeclareOp` points to a `ShapeOp` and we can walk the chain
 to get the value that represents the array bound in any dimension. We will
 create a compiler-generaed variable that will point to that location. This
-variable will be used in the DISubrange.
+variable will be used in the `DISubrangeAttr`.
 
 #### Assumed Size
 
@@ -301,11 +305,11 @@ information.
 The assumed shape array will use the similar representation as fixed size
 array but there will be 2 differences.
 
-1. There will be a datalocation field which will be an expression. This will
+1. There will be a `datalocation` field which will be an expression. This will
 enable debugger to get the data pointer from array descriptor.
 
-2. The field in `DISubrange` for array bounds will be expression which will
-allow the debugger to get the array bounds from descriptor. 
+2. The field in `DISubrangeAttr` for array bounds will be expression which will
+allow the debugger to get the bounds from descriptor. 
 
 ```
 integer(4), intent(out) :: a(:,:)
@@ -320,8 +324,8 @@ integer(4), intent(out) :: a(:,:)
 !8 = !DIBasicType(tag: DW_TAG_base_type, name: "integer" ...)
 ```
 
-In assumed shape case, the rank can be determined from the type. This allows
-us to generate a DISubrange in each dimension.
+In assumed shape case, the rank can be determined from the FIR's `SequenceType`.
+This allows us to generate a `DISubrangeAttr` in each dimension.
 
 #### Assumed Rank
 
@@ -330,38 +334,46 @@ array representation for asumed shape array with the following difference.
 
 1. `DICompositeTypeAttr` will have a rank field which will be an expression.
 It will be used to get the rank value from descriptor.
-2. A `DIGenericSubrange` will be used which will allow debuggers to calculate
-bounds in any dimension.
+2. Instead of `DISubrangeType` for each dimension, there will be
+`DIGenericSubrange` which will allow debuggers to calculate bounds in any
+dimension.
 
 ### Pointers and Allocatables
-The obvious implementation will be to treat them as pointer to a type. Thats
-how classic flang and gfortran seems to handle them in debug info.
+The pointer and allocatable will be represented using `DICompositeTypeAttr`. It
+is quirk of DWARF that scalar allocatable or pointer variables will show up in
+the debug info as pointer to scalar while array pointer or allocatable
+variables show up as arrays. The behavior is same in gfortran and classic flang
+too.
 
 ```
-integer, pointer :: pt
-(GDB) ptype pt
-type = PTR TO -> ( integer(kind=4) )
+  integer, allocatable :: ar(:)
+  integer, pointer :: sc
 
-But for arrays, the type of the allocatable or pointer variable is the array
-and not pointer to the array.
+!1 = !DILocalVariable(name: "sc", type: !2)
+!2 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !3, associated: !9 ...)
+!3 = !DIBasicType(tag: DW_TAG_base_type, name: "integer", ...)
+!4 = !DILocalVariable(name: "ar", type: !5 ...)
+!5 = !DICompositeType(tag: DW_TAG_array_type, baseType: !3, elements: !6, dataLocation: !8, allocated: !9)
+!6 = !{!7}
+!7 = !DISubrange(lowerBound: !10, upperBound: !11 ...)
+!8 = !DIExpression(DW_OP_push_object_address, DW_OP_deref)
+!9 = !DIExpression(DW_OP_push_object_address, DW_OP_deref, DW_OP_lit0, DW_OP_ne)
+!10 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 24, DW_OP_deref)
+!11 = !DIExpression(DW_OP_push_object_address, DW_OP_plus_uconst, 32, DW_OP_deref)
 
-integer, pointer, dimension (:,:) :: pa
-integer, target :: array(4,5)
-pa => array
-(gdb) ptype pa
-type = integer(kind=4) (4,5)
 ```
 
-The proposal is to keep this behavior in flang.
-
-Expressions will be generated to allow debuggers to find the
-allocated/associated status of these variables.
+IN FIR, these variable are represent as <!fir.box<!fir.heap<>> or
+fir.box<!fir.ptr<>>. There is also `allocatable` or `pointer` attribute on
+the `DeclareOp`. This allows us to generate allocated/associated status of
+these variables. The metadata to get the information from the descriptor is
+similar to arrays.
 
 ### Strings
 
-Fixed sized string will be treated like fixed sizes arrays in the debug info.
-The allocatabe string will be treated like like allocatable arrays. Debug
-metadata will be generated to enable debuggers to calculate its size.
+Fixed sized string will be treated like fixed sizes arrays and
+the allocatabe string will be treated like allocatable arrays. Metadata
+will be generated to enable debuggers to find its size.
 
 ```
   character(len=:), allocatable :: var
@@ -375,7 +387,7 @@ metadata will be generated to enable debuggers to calculate its size.
 !6 = !DIExpression(DW_OP_push_object_address, DW_OP_deref)
 
 !7 = !DILocalVariable(name: "fixed", type: !8)
-!8 = !DICompositeType(tag: DW_TAG_array_type, baseType: !1, size: 160, elements: !9)
+!8 = !DICompositeType(tag: DW_TAG_array_type, baseType: !3, size: 160, elements: !9)
 !9 = !DISubrange(count: 20, lowerBound: 1)
 ```
 
@@ -399,8 +411,8 @@ absent from mlir. A non comprehensive list is given below.
 3. `DISubrangeAttr` in mlir takes IntegerAttr at the moment so only works
 with fixed sizes arrays. It needs to also accept `DIExpressionAttr` or
 `DILocalVariableAttr` to support assumed shape and adjustable arrays.
-4. The `DICompositeTypeAttr` will need to have field for datalocation, rank,
-allocated and associated.
+4. The `DICompositeTypeAttr` will need to have field for `datalocation`,
+`rank`, `allocated` and `associated`.
 
 # Testing
 
@@ -423,3 +435,4 @@ allocated and associated.
 - [2] https://llvm.org/docs/LangRef.html#metadata
 - [3] https://archive.fosdem.org/2022/schedule/event/llvm_fortran_debug/
 - [4] https://github.com/llvm/llvm-project/blob/main/mlir/lib/Target/LLVMIR/DebugTranslation.cpp
+- [5] https://github.com/llvm/llvm-project/pull/84202
