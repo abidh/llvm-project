@@ -20,7 +20,7 @@ program mn
   i8 = fn1(i4, r8, l1)
   i4 = fn2(i8, r4, l4)
 contains
-  ! CHECK: #di_subprogram1 = #llvm.di_subprogram<id = {{.*}}, compileUnit = {{.*}}, scope = {{.*}}, name = "fn1", linkageName = "_QFPfn1", file = {{.*}}, line = [[@LINE+1]], scopeLine = [[@LINE+1]], subprogramFlags = Definition, type = #[[TY1]]>
+  ! CHECK: #{{.*}} = #llvm.di_subprogram<id = {{.*}}, compileUnit = {{.*}}, scope = {{.*}}, name = "fn1", linkageName = "_QFPfn1", file = {{.*}}, line = [[@LINE+1]], scopeLine = [[@LINE+1]], subprogramFlags = Definition, type = #[[TY1]]>
   function fn1(a, b, c) result (res)
     implicit none
     integer(kind=4), intent(in) :: a
@@ -30,7 +30,7 @@ contains
     res = a + b
   end function
 
-! CHECK: #di_subprogram2 = #llvm.di_subprogram<id = {{.*}}, compileUnit = {{.*}}, scope = {{.*}}, name = "fn2", linkageName = "_QFPfn2", file = {{.*}}, line = [[@LINE+1]], scopeLine = [[@LINE+1]], subprogramFlags = Definition, type = #[[TY2]]>
+! CHECK: #{{.*}} = #llvm.di_subprogram<id = {{.*}}, compileUnit = {{.*}}, scope = {{.*}}, name = "fn2", linkageName = "_QFPfn2", file = {{.*}}, line = [[@LINE+1]], scopeLine = [[@LINE+1]], subprogramFlags = Definition, type = #[[TY2]]>
   function fn2(a, b, c) result (res)
     implicit none
     integer(kind=8), intent(in) :: a
