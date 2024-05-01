@@ -15,6 +15,7 @@
 #include "flang/Common/Version.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Builder/Todo.h"
+#include "flang/Optimizer/CodeGen/CGOps.h"
 #include "flang/Optimizer/Dialect/FIRDialect.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
@@ -45,7 +46,7 @@ namespace fir {
 namespace {
 
 class AddDebugInfoPass : public fir::impl::AddDebugInfoBase<AddDebugInfoPass> {
-void handleDeclareOp(fir::DeclareOp declOp,
+void handleDeclareOp(fir::cg::XDeclareOp declOp,
                                             mlir::LLVM::DIFileAttr fileAttr,
                                             mlir::LLVM::DIScopeAttr scopeAttr,
                                             fir::DebugTypeGenerator &typeGen,
@@ -64,7 +65,7 @@ static uint32_t getLineFromLoc(mlir::Location loc) {
 
 } // namespace
 
-void AddDebugInfoPass::handleDeclareOp(fir::DeclareOp declOp,
+void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
                                        mlir::LLVM::DIFileAttr fileAttr,
                                        mlir::LLVM::DIScopeAttr scopeAttr,
                                        fir::DebugTypeGenerator &typeGen,
@@ -81,10 +82,7 @@ void AddDebugInfoPass::handleDeclareOp(fir::DeclareOp declOp,
       context, scopeAttr, mlir::StringAttr::get(context, result.second.name),
       fileAttr, getLineFromLoc(declOp.getLoc()), isLocal ? 0 : argNo++,
       /* alignInBits*/ 0, tyAttr);
-  if (isLocal)
-    defOp->setLoc(builder.getFusedLoc({defOp->getLoc()}, localVarAttr));
-  else
-    refOp.setLoc(builder.getFusedLoc({refOp.getLoc()}, localVarAttr));
+  declOp->setLoc(builder.getFusedLoc({declOp->getLoc()}, localVarAttr));
 }
 
 void AddDebugInfoPass::runOnOperation() {
@@ -186,7 +184,7 @@ void AddDebugInfoPass::runOnOperation() {
     funcOp->setLoc(builder.getFusedLoc({funcOp->getLoc()}, spAttr));
 
     uint32_t argNo = 1;
-    funcOp.walk([&](fir::DeclareOp declOp) {
+    funcOp.walk([&](fir::cg::XDeclareOp declOp) {
       handleDeclareOp(declOp, fileAttr, spAttr, typeGen, argNo);
     });
   });

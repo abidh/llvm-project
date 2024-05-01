@@ -6,6 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef FIR_ALIAS_TAG_OP_INTERFACE_TD
+#define FIR_ALIAS_TAG_OP_INTERFACE_TD
+
 include "mlir/IR/Interfaces.td"
 
 def FirAliasTagOpInterface : OpInterface<"FirAliasTagOpInterface"> {
@@ -57,3 +60,4 @@ def FirAliasTagOpInterface : OpInterface<"FirAliasTagOpInterface"> {
       >
   ];
 }
+#endif // FIR_ALIAS_TAG_OP_INTERFACE_TD

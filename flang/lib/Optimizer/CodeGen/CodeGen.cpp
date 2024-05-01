@@ -12,7 +12,7 @@
 
 #include "flang/Optimizer/CodeGen/CodeGen.h"
 
-#include "CGOps.h"
+#include "flang/Optimizer/CodeGen/CGOps.h"
 #include "flang/Optimizer/CodeGen/CodeGenOpenMP.h"
 #include "flang/Optimizer/CodeGen/FIROpPatterns.h"
 #include "flang/Optimizer/CodeGen/TypeConverter.h"
@@ -171,11 +171,11 @@ genAllocationScaleSize(OP op, mlir::Type ity,
 }
 
 namespace {
-struct DeclareOpConversion : public fir::FIROpConversion<fir::DeclareOp> {
+struct DeclareOpConversion : public fir::FIROpConversion<fir::cg::XDeclareOp> {
 public:
   using FIROpConversion::FIROpConversion;
   mlir::LogicalResult
-  matchAndRewrite(fir::DeclareOp declareOp, OpAdaptor adaptor,
+  matchAndRewrite(fir::cg::XDeclareOp declareOp, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
     //declareOp.getMemref().dump();
     auto memRef = adaptor.getOperands()[0];
@@ -3641,7 +3641,6 @@ public:
     fir::populateOpenMPFIRToLLVMConversionPatterns(typeConverter, pattern);
 
     mlir::ConversionTarget target{*context};
-    target.addIllegalOp<fir::DeclareOp>();
     target.addLegalDialect<mlir::LLVM::LLVMDialect>();
     // The OpenMP dialect is legal for Operations without regions, for those
     // which contains regions it is legal if the region contains only the
