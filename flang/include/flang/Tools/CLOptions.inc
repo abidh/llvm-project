@@ -337,6 +337,7 @@ inline void createDefaultFIRCodeGenPassPipeline(mlir::PassManager &pm,
     MLIRToLLVMPassPipelineConfig config, llvm::StringRef inputFilename = {}) {
   fir::addBoxedProcedurePass(pm);
   addNestedPassToAllTopLevelOperations(pm, fir::createAbstractResultOpt);
+  //fir::createDebugPasses(pm, config.DebugInfo, config.OptLevel, inputFilename);
   fir::addCodeGenRewritePass(pm);
   fir::addTargetRewritePass(pm);
   fir::addExternalNameConversionPass(pm, config.Underscoring);

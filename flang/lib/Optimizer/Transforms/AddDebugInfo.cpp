@@ -45,12 +45,47 @@ namespace fir {
 namespace {
 
 class AddDebugInfoPass : public fir::impl::AddDebugInfoBase<AddDebugInfoPass> {
+void handleDeclareOp(fir::DeclareOp declOp,
+                                            mlir::LLVM::DIFileAttr fileAttr,
+                                            mlir::LLVM::DIScopeAttr scopeAttr,
+                                            fir::DebugTypeGenerator &typeGen,
+                                            uint32_t &argNo);
 public:
   AddDebugInfoPass(fir::AddDebugInfoOptions options) : Base(options) {}
   void runOnOperation() override;
 };
 
+static uint32_t getLineFromLoc(mlir::Location loc) {
+  uint32_t line = 1;
+  if (auto fileLoc = mlir::dyn_cast<mlir::FileLineColLoc>(loc))
+    line = fileLoc.getLine();
+  return line;
+}
+
 } // namespace
+
+void AddDebugInfoPass::handleDeclareOp(fir::DeclareOp declOp,
+                                       mlir::LLVM::DIFileAttr fileAttr,
+                                       mlir::LLVM::DIScopeAttr scopeAttr,
+                                       fir::DebugTypeGenerator &typeGen,
+                                       uint32_t &argNo) {
+  mlir::MLIRContext *context = &getContext();
+  mlir::OpBuilder builder(context);
+
+  auto refOp = declOp.getMemref();
+  auto defOp = refOp.getDefiningOp();
+  bool isLocal = (defOp != nullptr);
+  auto tyAttr = typeGen.convertType(fir::unwrapRefType(declOp.getType()), fileAttr, scopeAttr, declOp.getLoc());
+  auto result = fir::NameUniquer::deconstruct(declOp.getUniqName());
+  auto localVarAttr = mlir::LLVM::DILocalVariableAttr::get(
+      context, scopeAttr, mlir::StringAttr::get(context, result.second.name),
+      fileAttr, getLineFromLoc(declOp.getLoc()), isLocal ? 0 : argNo++,
+      /* alignInBits*/ 0, tyAttr);
+  if (isLocal)
+    defOp->setLoc(builder.getFusedLoc({defOp->getLoc()}, localVarAttr));
+  else
+    refOp.setLoc(builder.getFusedLoc({refOp.getLoc()}, localVarAttr));
+}
 
 void AddDebugInfoPass::runOnOperation() {
   mlir::ModuleOp module = getOperation();
@@ -144,14 +179,16 @@ void AddDebugInfoPass::runOnOperation() {
       subprogramFlags =
           subprogramFlags | mlir::LLVM::DISubprogramFlags::Definition;
     }
-    unsigned line = 1;
-    if (auto funcLoc = mlir::dyn_cast<mlir::FileLineColLoc>(l))
-      line = funcLoc.getLine();
-
+    unsigned line = getLineFromLoc(l);
     auto spAttr = mlir::LLVM::DISubprogramAttr::get(
         context, id, compilationUnit, fileAttr, funcName, fullName,
         funcFileAttr, line, line, subprogramFlags, subTypeAttr);
     funcOp->setLoc(builder.getFusedLoc({funcOp->getLoc()}, spAttr));
+
+    uint32_t argNo = 1;
+    funcOp.walk([&](fir::DeclareOp declOp) {
+      handleDeclareOp(declOp, fileAttr, spAttr, typeGen, argNo);
+    });
   });
 }
 

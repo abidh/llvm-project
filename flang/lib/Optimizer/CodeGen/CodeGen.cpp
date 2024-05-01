@@ -171,6 +171,29 @@ genAllocationScaleSize(OP op, mlir::Type ity,
 }
 
 namespace {
+struct DeclareOpConversion : public fir::FIROpConversion<fir::DeclareOp> {
+public:
+  using FIROpConversion::FIROpConversion;
+  mlir::LogicalResult
+  matchAndRewrite(fir::DeclareOp declareOp, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    //declareOp.getMemref().dump();
+    auto memRef = adaptor.getOperands()[0];
+    auto loc = declareOp.getLoc();
+    if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc)) {
+      if (auto varAttr =
+            mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(fusedLoc.getMetadata())){
+        rewriter.create<mlir::LLVM::DbgDeclareOp>(
+              memRef.getLoc(), memRef, varAttr, nullptr);
+      }
+    }
+    rewriter.replaceOp(declareOp, memRef);
+    return mlir::success();
+  }
+};
+}
+
+namespace {
 /// convert to LLVM IR dialect `alloca`
 struct AllocaOpConversion : public fir::FIROpConversion<fir::AllocaOp> {
   using FIROpConversion::FIROpConversion;
@@ -3437,8 +3460,18 @@ struct MustBeDeadConversion : public fir::FIROpConversion<FromOp> {
   mlir::LogicalResult
   matchAndRewrite(FromOp op, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const final {
-    if (!op->getUses().empty())
+    llvm::errs() << "*** Converting ShapeShiftOp\n";
+    if (!op->getUses().empty()) {
+      llvm::errs() << "Has uses\n";
+      op.dump();
+      /*for (auto u: op->getUses()) {
+        u.dump();
+        llvm::errs()<< "==============\n";
+      }*/
+
+
       return rewriter.notifyMatchFailure(op, "op must be dead");
+    }
     rewriter.eraseOp(op);
     return mlir::success();
   }
@@ -3535,6 +3568,7 @@ public:
   mlir::ModuleOp getModule() { return getOperation(); }
 
   void runOnOperation() override final {
+    llvm::errs() << "*** Starting Codegen\n";  
     auto mod = getModule();
     if (!forcedTargetTriple.empty())
       fir::setTargetTriple(mod, forcedTargetTriple);
@@ -3607,6 +3641,7 @@ public:
     fir::populateOpenMPFIRToLLVMConversionPatterns(typeConverter, pattern);
 
     mlir::ConversionTarget target{*context};
+    target.addIllegalOp<fir::DeclareOp>();
     target.addLegalDialect<mlir::LLVM::LLVMDialect>();
     // The OpenMP dialect is legal for Operations without regions, for those
     // which contains regions it is legal if the region contains only the
@@ -3714,7 +3749,7 @@ void fir::populateFIRToLLVMConversionPatterns(
       BoxOffsetOpConversion, BoxProcHostOpConversion, BoxRankOpConversion,
       BoxTypeCodeOpConversion, BoxTypeDescOpConversion, CallOpConversion,
       CmpcOpConversion, ConstcOpConversion, ConvertOpConversion,
-      CoordinateOpConversion, DTEntryOpConversion, DivcOpConversion,
+      CoordinateOpConversion, DTEntryOpConversion, DivcOpConversion, DeclareOpConversion,
       EmboxOpConversion, EmboxCharOpConversion, EmboxProcOpConversion,
       ExtractValueOpConversion, FieldIndexOpConversion, FirEndOpConversion,
       FreeMemOpConversion, GlobalLenOpConversion, GlobalOpConversion,

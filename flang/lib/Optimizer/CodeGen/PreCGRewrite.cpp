@@ -276,6 +276,7 @@ public:
   mlir::LogicalResult
   matchAndRewrite(fir::DeclareOp declareOp,
                   mlir::PatternRewriter &rewriter) const override {
+                    
     rewriter.replaceOp(declareOp, declareOp.getMemref());
     return mlir::success();
   }
