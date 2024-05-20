@@ -93,7 +93,11 @@ DICompositeTypeAttr DebugImporter::translateImpl(llvm::DICompositeType *node) {
       getStringAttrOrNull(node->getRawName()), translate(node->getFile()),
       node->getLine(), translate(node->getScope()), baseType,
       flags.value_or(DIFlags::Zero), node->getSizeInBits(),
-      node->getAlignInBits(), elements);
+      node->getAlignInBits(), elements,
+      translateExpression(node->getDataLocationExp()),
+      translateExpression(node->getRankExp()),
+      translateExpression(node->getAllocatedExp()),
+      translateExpression(node->getAssociatedExp()));
 }
 
 DIDerivedTypeAttr DebugImporter::translateImpl(llvm::DIDerivedType *node) {
@@ -214,13 +218,17 @@ DISubprogramAttr DebugImporter::translateImpl(llvm::DISubprogram *node) {
 
 DISubrangeAttr DebugImporter::translateImpl(llvm::DISubrange *node) {
   auto getIntegerAttrOrNull = [&](llvm::DISubrange::BoundType data) {
-    if (auto *constInt = llvm::dyn_cast_or_null<llvm::ConstantInt *>(data))
-      return IntegerAttr::get(IntegerType::get(context, 64),
+    if (auto *constInt = llvm::dyn_cast_or_null<llvm::ConstantInt *>(data)) {
+      auto IA = IntegerAttr::get(IntegerType::get(context, 64),
                               constInt->getSExtValue());
-    return IntegerAttr();
+      return DISubrangeValueAttr::get(context, IA, DIExpressionAttr());
+    } else if (auto *Expr = llvm::dyn_cast_or_null<llvm::DIExpression *>(data)) {
+      return DISubrangeValueAttr::get(context, IntegerAttr(), translateExpression(Expr));
+    }  
+    return DISubrangeValueAttr();
   };
-  IntegerAttr count = getIntegerAttrOrNull(node->getCount());
-  IntegerAttr upperBound = getIntegerAttrOrNull(node->getUpperBound());
+  DISubrangeValueAttr count = getIntegerAttrOrNull(node->getCount());
+  DISubrangeValueAttr upperBound = getIntegerAttrOrNull(node->getUpperBound());
   // Either count or the upper bound needs to be present. Otherwise, the
   // metadata is invalid. The conversion might fail due to unsupported DI nodes.
   if (!count && !upperBound)

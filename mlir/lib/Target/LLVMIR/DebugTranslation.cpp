@@ -156,7 +156,11 @@ DebugTranslation::translateImpl(DICompositeTypeAttr attr) {
       /*OffsetInBits=*/0,
       /*Flags=*/static_cast<llvm::DINode::DIFlags>(attr.getFlags()),
       llvm::MDNode::get(llvmCtx, elements),
-      /*RuntimeLang=*/0, /*VTableHolder=*/nullptr);
+      /*RuntimeLang=*/0, /*VTableHolder=*/nullptr,
+      /* TemplateParams */ nullptr, /* Identifier */ nullptr,
+      /* Discriminator */ nullptr, translateExpression(attr.getDataLocation()),
+      translateExpression(attr.getAssociated()), translateExpression(attr.getAllocated()),
+      translateExpression(attr.getRank()));
 }
 
 llvm::DIDerivedType *DebugTranslation::translateImpl(DIDerivedTypeAttr attr) {
@@ -301,11 +305,15 @@ llvm::DINamespace *DebugTranslation::translateImpl(DINamespaceAttr attr) {
 }
 
 llvm::DISubrange *DebugTranslation::translateImpl(DISubrangeAttr attr) {
-  auto getMetadataOrNull = [&](IntegerAttr attr) -> llvm::Metadata * {
-    if (!attr)
+  auto getMetadataOrNull = [&](LLVM::DISubrangeValueAttr valAttr) -> llvm::Metadata * {
+    if (!valAttr)
       return nullptr;
-    return llvm::ConstantAsMetadata::get(llvm::ConstantInt::getSigned(
-        llvm::Type::getInt64Ty(llvmCtx), attr.getInt()));
+    if (IntegerAttr IA = valAttr.getVal()) {
+      return llvm::ConstantAsMetadata::get(llvm::ConstantInt::getSigned(
+        llvm::Type::getInt64Ty(llvmCtx), IA.getInt()));
+    } else if (LLVM::DIExpressionAttr EA = valAttr.getExpr()) {
+      return translateExpression(EA);
+    }
   };
   return llvm::DISubrange::get(llvmCtx, getMetadataOrNull(attr.getCount()),
                                getMetadataOrNull(attr.getLowerBound()),

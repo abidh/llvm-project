@@ -385,7 +385,11 @@ def LLVM_DICompositeTypeAttr : LLVM_Attr<"DICompositeType", "di_composite_type",
     OptionalParameter<"DIFlags", "DIFlags::Zero">:$flags,
     OptionalParameter<"uint64_t">:$sizeInBits,
     OptionalParameter<"uint64_t">:$alignInBits,
-    OptionalArrayRefParameter<"DINodeAttr">:$elements
+    OptionalArrayRefParameter<"DINodeAttr">:$elements,
+    OptionalParameter<"DIExpressionAttr">:$dataLocation,
+    OptionalParameter<"DIExpressionAttr">:$rank,
+    OptionalParameter<"DIExpressionAttr">:$allocated,
+    OptionalParameter<"DIExpressionAttr">:$associated
   );
   let assemblyFormat = "`<` struct(params) `>`";
   let extraClassDeclaration = [{
@@ -618,16 +622,28 @@ def LLVM_DINamespaceAttr : LLVM_Attr<"DINamespace", "di_namespace",
 // DISubrangeAttr
 //===----------------------------------------------------------------------===//
 
-def LLVM_DISubrangeAttr : LLVM_Attr<"DISubrange", "di_subrange", /*traits=*/[],
+def LLVM_DISubrangeValueAttr : LLVM_Attr<"DISubrangeValue",
+                                    "di_subrange_value", /*traits=*/[],
                                     "DINodeAttr"> {
   let parameters = (ins
-    OptionalParameter<"IntegerAttr">:$count,
-    OptionalParameter<"IntegerAttr">:$lowerBound,
-    OptionalParameter<"IntegerAttr">:$upperBound,
-    OptionalParameter<"IntegerAttr">:$stride
+    OptionalParameter<"IntegerAttr">:$val,
+    OptionalParameter<"DIExpressionAttr">:$expr
   );
   let assemblyFormat = "`<` struct(params) `>`";
 }
+
+def LLVM_DISubrangeAttr : LLVM_Attr<"DISubrange", "di_subrange", /*traits=*/[],
+                                    "DINodeAttr"> {
+  let parameters = (ins
+    OptionalParameter<"DISubrangeValueAttr">:$count,
+    OptionalParameter<"DISubrangeValueAttr">:$lowerBound,
+    OptionalParameter<"DISubrangeValueAttr">:$upperBound,
+    OptionalParameter<"DISubrangeValueAttr">:$stride
+  );
+  let assemblyFormat = "`<` struct(params) `>`";
+}
+
+
 
 //===----------------------------------------------------------------------===//
 // DISubroutineTypeAttr
