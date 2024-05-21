@@ -57,7 +57,50 @@ DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
                         mlir::StringAttr::get(context, logTy.getMnemonic()),
                         kindMapping.getLogicalBitsize(logTy.getFKind()),
                         llvm::dwarf::DW_ATE_boolean);
+  } else if (auto boxTy = mlir::dyn_cast_or_null<fir::BoxType>(Ty)) {
+    auto elTy = boxTy.getElementType();
+    if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy)) {
+      auto elemTy = convertType(seqTy.getEleTy(), fileAttr, scope, loc);
+        if (seqTy.hasUnknownShape()) {
+
+        } else {
+          auto intTy = mlir::IntegerType::get(context, 64);
+          auto one = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
+          auto lowerAttr = mlir::LLVM::DISubrangeValueAttr::get(context, one, mlir::LLVM::DIExpressionAttr());
+          llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
+          unsigned offset = 32;
+          for (auto dim : seqTy.getShape()) {
+            llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+            ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_push_object_address, {}));
+            ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_plus_uconst, {offset}));
+            ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_deref, {}));
+            offset += 24;
+            auto expr = mlir::LLVM::DIExpressionAttr::get(context, ops);
+            auto countAttr = mlir::LLVM::DISubrangeValueAttr::get(context, mlir::IntegerAttr(), expr);
+            auto subrangeTy = mlir::LLVM::DISubrangeAttr::get(
+                  context, nullptr, lowerAttr, countAttr, nullptr);
+              elements.push_back(subrangeTy);
+          }
+            llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+            ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_push_object_address, {}));
+            ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_deref, {}));
+            auto dataLocation = mlir::LLVM::DIExpressionAttr::get(context, ops);
+          // Apart from arrays, the `DICompositeTypeAttr` is used for other
+          // things like structure types. Many of its fields which are not
+          // applicable to arrays have been set to some valid default values.
+
+          return mlir::LLVM::DICompositeTypeAttr::get(
+              context, llvm::dwarf::DW_TAG_array_type, /*recursive id*/ {},
+              /* name */ nullptr, /* file */ nullptr, /* line */ 0,
+              /* scope */ nullptr, elemTy, mlir::LLVM::DIFlags::Zero,
+              /* sizeInBits */ 0,
+              /*alignInBits*/ 0, elements, dataLocation,
+              nullptr,nullptr,nullptr);
+        }
+      }
+    return genPlaceholderType(context);
   } else {
+    // return convertSequenceType(seqTy, fileAttr, scope, loc); else {
     // FIXME: These types are currently unhandled. We are generating a
     // placeholder type to allow us to test supported bits.
     return genPlaceholderType(context);
