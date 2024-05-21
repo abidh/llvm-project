@@ -313,6 +313,8 @@ llvm::DISubrange *DebugTranslation::translateImpl(DISubrangeAttr attr) {
         llvm::Type::getInt64Ty(llvmCtx), IA.getInt()));
     } else if (LLVM::DIExpressionAttr EA = valAttr.getExpr()) {
       return translateExpression(EA);
+    } else {
+      llvm_unreachable("Invalid DISubrangeValueAttr");
     }
   };
   return llvm::DISubrange::get(llvmCtx, getMetadataOrNull(attr.getCount()),
@@ -380,12 +382,13 @@ llvm::DILocation *DebugTranslation::translateLoc(Location loc,
 llvm::DIExpression *
 DebugTranslation::translateExpression(LLVM::DIExpressionAttr attr) {
   SmallVector<uint64_t, 1> ops;
-  if (attr) {
-    // Append operations their operands to the list.
-    for (const DIExpressionElemAttr &op : attr.getOperations()) {
-      ops.push_back(op.getOpcode());
-      append_range(ops, op.getArguments());
-    }
+  if (!attr)
+    return nullptr;
+  
+  // Append operations their operands to the list.
+  for (const DIExpressionElemAttr &op : attr.getOperations()) {
+    ops.push_back(op.getOpcode());
+    append_range(ops, op.getArguments());
   }
   return llvm::DIExpression::get(llvmCtx, ops);
 }
