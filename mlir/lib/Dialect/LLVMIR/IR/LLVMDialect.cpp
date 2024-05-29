@@ -3029,7 +3029,7 @@ struct LLVMOpAsmDialectInterface : public OpAsmDialectInterface {
         .Case<AccessGroupAttr, AliasScopeAttr, AliasScopeDomainAttr,
               DIBasicTypeAttr, DICompileUnitAttr, DICompositeTypeAttr,
               DIDerivedTypeAttr, DIFileAttr, DIGlobalVariableAttr,
-              DIGlobalVariableExpressionAttr, DILabelAttr, DILexicalBlockAttr,
+              DIGlobalVariableExpressionAttr, DILabelAttr, DIStringTypeAttr, DILexicalBlockAttr,
               DILexicalBlockFileAttr, DILocalVariableAttr, DIModuleAttr,
               DINamespaceAttr, DINullTypeAttr, DISubprogramAttr,
               DISubroutineTypeAttr, LoopAnnotationAttr, LoopVectorizeAttr,

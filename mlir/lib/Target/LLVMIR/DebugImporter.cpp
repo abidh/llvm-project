@@ -113,6 +113,21 @@ DIDerivedTypeAttr DebugImporter::translateImpl(llvm::DIDerivedType *node) {
       node->getOffsetInBits(), node->getDWARFAddressSpace(), extraData);
 }
 
+DIStringTypeAttr DebugImporter::translateImpl(llvm::DIStringType *node) {
+  llvm::DINode *stringLength = nullptr;
+  if (llvm::DILocalVariable *local = dyn_cast_or_null<llvm::DILocalVariable>(node->getStringLength()))
+    stringLength = local;
+  else if (llvm::DIGlobalVariable *global = dyn_cast_or_null<llvm::DIGlobalVariable>(node->getStringLength()))
+    stringLength = global;
+  return DIStringTypeAttr::get(
+      context, node->getTag(), getStringAttrOrNull(node->getRawName()),
+      node->getSizeInBits(), node->getAlignInBits(),
+      translate(stringLength),
+      translateExpression(node->getStringLengthExp()),
+      translateExpression(node->getStringLocationExp()),
+      node->getEncoding());
+}
+
 DIFileAttr DebugImporter::translateImpl(llvm::DIFile *node) {
   return DIFileAttr::get(context, node->getFilename(), node->getDirectory());
 }
@@ -294,6 +309,8 @@ DINodeAttr DebugImporter::translate(llvm::DINode *node) {
     if (auto *casted = dyn_cast<llvm::DICompositeType>(node))
       return translateImpl(casted);
     if (auto *casted = dyn_cast<llvm::DIDerivedType>(node))
+      return translateImpl(casted);
+    if (auto *casted = dyn_cast<llvm::DIStringType>(node))
       return translateImpl(casted);
     if (auto *casted = dyn_cast<llvm::DIFile>(node))
       return translateImpl(casted);
