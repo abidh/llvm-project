@@ -78,6 +78,40 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
       /* associated */ nullptr);
 }
 
+mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
+    fir::CharacterType charTy, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
+  mlir::MLIRContext *context = module.getContext();
+  if (charTy.hasConstantLen()) {
+    std::string name(charTy.getMnemonic());
+    name += "(" + std::to_string(charTy.hasConstantLen()) + ")";
+    return mlir::LLVM::DIStringTypeAttr::get(
+        context, llvm::dwarf::DW_TAG_string_type,
+        mlir::StringAttr::get(context, name),
+        charTy.getLen() * 8, 0, nullptr, nullptr, nullptr,
+        llvm::dwarf::DW_ATE_unsigned);
+  } else {
+    std::string name(charTy.getMnemonic());
+    name += "(*)";
+    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_push_object_address, {}));
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_plus_uconst, {8}));
+    auto size = mlir::LLVM::DIExpressionAttr::get(context, ops);
+    ops.clear();
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_push_object_address, {}));
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_deref, {}));
+    auto loc = mlir::LLVM::DIExpressionAttr::get(context, ops);
+    return mlir::LLVM::DIStringTypeAttr::get(
+        context, llvm::dwarf::DW_TAG_string_type,
+        mlir::StringAttr::get(context, name), 0, 0, nullptr,
+        size, loc, llvm::dwarf::DW_ATE_unsigned);
+  }
+}
+
 mlir::LLVM::DITypeAttr
 DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
                                 mlir::LLVM::DIScopeAttr scope,
@@ -113,52 +147,11 @@ DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
   } else if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(Ty)) {
     return convertSequenceType(seqTy, fileAttr, scope, loc);
   }  else if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(Ty)) {
-    if (charTy.hasConstantLen()) {
-  return mlir::LLVM::DIStringTypeAttr::get(
-      context, llvm::dwarf::DW_TAG_string_type,
-      mlir::StringAttr::get(context, charTy.getMnemonic()), charTy.getLen()*8, 0,
-      nullptr, nullptr, nullptr, llvm::dwarf::DW_ATE_unsigned);
-    } else {
-llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_push_object_address, {}));
-ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_plus_uconst, {8}));
-ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_deref, {}));
-auto size = mlir::LLVM::DIExpressionAttr::get(context, ops);
-llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops1;
-ops1.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_push_object_address, {}));
-ops1.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_deref, {}));
-auto loc = mlir::LLVM::DIExpressionAttr::get(context, ops);
-        return mlir::LLVM::DIStringTypeAttr::get(
-      context, llvm::dwarf::DW_TAG_string_type,
-      mlir::StringAttr::get(context, charTy.getMnemonic()), 0, 0,
-      nullptr, size, loc, llvm::dwarf::DW_ATE_unsigned);
-    }
+    return convertCharacterType(charTy, fileAttr, scope, loc);
   } else if (auto boxTy = mlir::dyn_cast_or_null<fir::BoxType>(Ty)) {
     auto elTy = boxTy.getElementType();
     if (auto heapTy = mlir::dyn_cast_or_null<fir::HeapType>(elTy)) {
-      elTy = heapTy.getElementType();
-    }
-    if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(elTy)) {
-      if (charTy.hasConstantLen()) {
-        return mlir::LLVM::DIStringTypeAttr::get(
-          context, llvm::dwarf::DW_TAG_string_type,
-          mlir::StringAttr::get(context, charTy.getMnemonic()), charTy.getLen()*8, 0,
-          nullptr, nullptr, nullptr, llvm::dwarf::DW_ATE_unsigned);
-      } else {
-        llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-        ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_push_object_address, {}));
-        ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_plus_uconst, {8}));
-        ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_deref, {}));
-        auto size = mlir::LLVM::DIExpressionAttr::get(context, ops);
-        llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops1;
-        ops1.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_push_object_address, {}));
-        ops1.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_deref, {}));
-        auto loc = mlir::LLVM::DIExpressionAttr::get(context, ops1);
-        return mlir::LLVM::DIStringTypeAttr::get(
-          context, llvm::dwarf::DW_TAG_string_type,
-          mlir::StringAttr::get(context, charTy.getMnemonic()), 0, 0,
-          nullptr, size, loc, llvm::dwarf::DW_ATE_unsigned);
-      }
+      return convertType(heapTy.getElementType(), fileAttr, scope, loc);
     }
     return genPlaceholderType(context);
   } else {
