@@ -39,35 +39,31 @@ static mlir::LLVM::DITypeAttr genPlaceholderType(mlir::MLIRContext *context) {
                       llvm::dwarf::DW_ATE_signed);
 }
 
-mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
+mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
     fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
     mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
 
   mlir::MLIRContext *context = module.getContext();
-  // FIXME: Only fixed sizes arrays handled at the moment.
-  if (seqTy.hasDynamicExtents()) {
-    auto intTy = mlir::IntegerType::get(context, 64);
-    auto one = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
-    auto lowerAttr = mlir::LLVM::DISubrangeValueAttr::get(
-        context, one, mlir::LLVM::DIExpressionAttr());
-    llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
-    unsigned offset = 32;
-    for (auto dim : seqTy.getShape()) {
-      llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-      ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-          context, llvm::dwarf::DW_OP_push_object_address, {}));
-      ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-          context, llvm::dwarf::DW_OP_plus_uconst, {offset}));
-      ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-          context, llvm::dwarf::DW_OP_deref, {}));
-      offset += 24;
-      auto expr = mlir::LLVM::DIExpressionAttr::get(context, ops);
-      auto countAttr = mlir::LLVM::DISubrangeValueAttr::get(
-          context, mlir::IntegerAttr(), expr);
-      auto subrangeTy = mlir::LLVM::DISubrangeAttr::get(
-          context, nullptr, lowerAttr, countAttr, nullptr);
-      elements.push_back(subrangeTy);
-    }
+  llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
+  auto intTy = mlir::IntegerType::get(context, 64);
+  auto lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
+  mlir::LLVM::DITypeAttr elemTy =
+      convertType(seqTy.getEleTy(), fileAttr, scope, loc);
+  unsigned offset = 32;
+  for (auto dim : seqTy.getShape()) {
+    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_push_object_address, {}));
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_plus_uconst, {offset}));
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, llvm::dwarf::DW_OP_deref, {}));
+    offset += 24;
+    auto countAttr = mlir::LLVM::DIExpressionAttr::get(context, ops);
+    auto subrangeTy = mlir::LLVM::DISubrangeAttr::get(
+        context, nullptr, lowerAttr, countAttr, nullptr);
+    elements.push_back(subrangeTy);
+  }
     llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
     ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
         context, llvm::dwarf::DW_OP_push_object_address, {}));
@@ -84,14 +80,23 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
         /* scope */ nullptr, elemTy, mlir::LLVM::DIFlags::Zero,
         /* sizeInBits */ 0,
         /*alignInBits*/ 0, elements, dataLocation, nullptr, nullptr, nullptr);
-  }
+}
+
+mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
+    fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
+  mlir::MLIRContext *context = module.getContext();
+  if (seqTy.hasDynamicExtents())
+    return genPlaceholderType(context);
 
   llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
+  auto intTy = mlir::IntegerType::get(context, 64);
+  auto lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
   mlir::LLVM::DITypeAttr elemTy =
       convertType(seqTy.getEleTy(), fileAttr, scope, loc);
+  // FIXME: Only fixed sizes arrays handled at the moment.
 
   for (fir::SequenceType::Extent dim : seqTy.getShape()) {
-    auto intTy = mlir::IntegerType::get(context, 64);
     // FIXME: Only supporting lower bound of 1 at the moment. The
     // 'SequenceType' has information about the shape but not the shift. In
     // cases where the conversion originated during the processing of
@@ -100,7 +105,6 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
     // the type class so that it works from everywhere (e.g. when it is part
     // of a module or a derived type.)
     auto countAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, dim));
-    auto lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
     auto subrangeTy = mlir::LLVM::DISubrangeAttr::get(
         context, countAttr, lowerAttr, nullptr, nullptr);
     elements.push_back(subrangeTy);
@@ -161,9 +165,41 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertHeapType(
   // mechanism.
   mlir::MLIRContext *context = module.getContext();
   mlir::Type elTy = heapTy.getElementType();
+  if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
+    return convertBoxedSequenceType(seqTy, fileAttr, scope, loc);
+  if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(elTy))
+    return convertCharacterType(charTy, fileAttr, scope, loc);
   mlir::LLVM::DITypeAttr elTyAttr = convertType(elTy, fileAttr, scope, loc);
-  if (mlir::isa<fir::CharacterType>(elTy) || mlir::isa<fir::SequenceType>(elTy))
-    return elTyAttr;
+  std::optional<mlir::DataLayout> dl =
+      fir::support::getOrSetDataLayout(module, /*allowDefaultLayout=*/true);
+  if (!dl) {
+    mlir::emitError(module.getLoc(),
+                    "module operation must carry a data layout attribute "
+                    "to generate llvm IR from FIR");
+    // signalPassFailure();
+    return genPlaceholderType(context);
+  }
+  // auto size = dl->getTypeSizeInBits(elTy);
+  return mlir::LLVM::DIDerivedTypeAttr::get(
+      context, llvm::dwarf::DW_TAG_pointer_type,
+      mlir::StringAttr::get(context, ""), elTyAttr, 8,
+      /*alignInBits*/ 0, /* offset */ 0, std::nullopt, nullptr);
+}
+
+mlir::LLVM::DITypeAttr DebugTypeGenerator::convertPointerType(
+    fir::PointerType ptrTy, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
+  // The types which use DIStringType or DICompositeType have builtin
+  // mechanism to get the location of the data (using dataLocation field or
+  // stringLocationExp field.). For other types, we will use pointer style
+  // mechanism.
+  mlir::MLIRContext *context = module.getContext();
+  mlir::Type elTy = ptrTy.getElementType();
+  if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
+    return convertBoxedSequenceType(seqTy, fileAttr, scope, loc);
+  if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(elTy))
+    return convertCharacterType(charTy, fileAttr, scope, loc);
+  mlir::LLVM::DITypeAttr elTyAttr = convertType(elTy, fileAttr, scope, loc);
   std::optional<mlir::DataLayout> dl =
       fir::support::getOrSetDataLayout(module, /*allowDefaultLayout=*/true);
   if (!dl) {
@@ -220,6 +256,10 @@ DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
     auto elTy = boxTy.getElementType();
     if (auto heapTy = mlir::dyn_cast_or_null<fir::HeapType>(elTy))
       return convertHeapType(heapTy, fileAttr, scope, loc);
+    if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
+      return convertBoxedSequenceType(seqTy, fileAttr, scope, loc);
+    if (auto ptrTy = mlir::dyn_cast_or_null<fir::PointerType>(elTy))
+      return convertPointerType(ptrTy, fileAttr, scope, loc);
     return convertType(elTy, fileAttr, scope, loc);
   } else {
     // FIXME: These types are currently unhandled. We are generating a

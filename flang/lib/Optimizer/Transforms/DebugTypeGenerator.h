@@ -42,6 +42,14 @@ private:
                                          mlir::LLVM::DIFileAttr fileAttr,
                                          mlir::LLVM::DIScopeAttr scope,
                                          mlir::Location loc);
+  mlir::LLVM::DITypeAttr
+  convertBoxedSequenceType(fir::SequenceType seqTy,
+                           mlir::LLVM::DIFileAttr fileAttr,
+                           mlir::LLVM::DIScopeAttr scope, mlir::Location loc);
+  mlir::LLVM::DITypeAttr convertPointerType(fir::PointerType ptrTy,
+                                            mlir::LLVM::DIFileAttr fileAttr,
+                                            mlir::LLVM::DIScopeAttr scope,
+                                            mlir::Location loc);
   mlir::ModuleOp module;
   KindMapping kindMapping;
 };
