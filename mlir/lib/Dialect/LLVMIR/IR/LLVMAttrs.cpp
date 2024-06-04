@@ -61,7 +61,8 @@ bool DINodeAttr::classof(Attribute attr) {
                    DILabelAttr, DILexicalBlockAttr, DILexicalBlockFileAttr,
                    DILocalVariableAttr, DIModuleAttr, DINamespaceAttr,
                    DINullTypeAttr, DISubprogramAttr, DISubrangeAttr,
-                   DISubroutineTypeAttr, DIStringTypeAttr>(attr);
+                   DIGenericSubrangeAttr, DISubroutineTypeAttr,
+                   DIStringTypeAttr>(attr);
 }
 
 //===----------------------------------------------------------------------===//

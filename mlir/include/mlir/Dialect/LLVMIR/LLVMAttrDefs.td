@@ -633,6 +633,17 @@ def LLVM_DISubrangeAttr : LLVM_Attr<"DISubrange", "di_subrange", /*traits=*/[],
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
+def LLVM_DIGenericSubrangeAttr : LLVM_Attr<"DIGenericSubrange", "di_generic_subrange", /*traits=*/[],
+                                    "DINodeAttr"> {
+  let parameters = (ins
+    OptionalParameter<"::mlir::Attribute">:$count,
+    OptionalParameter<"::mlir::Attribute">:$lowerBound,
+    OptionalParameter<"::mlir::Attribute">:$upperBound,
+    OptionalParameter<"::mlir::Attribute">:$stride
+  );
+  let assemblyFormat = "`<` struct(params) `>`";
+}
+
 //===----------------------------------------------------------------------===//
 // DISubroutineTypeAttr
 //===----------------------------------------------------------------------===//

@@ -352,6 +352,33 @@ llvm::DISubrange *DebugTranslation::translateImpl(DISubrangeAttr attr) {
                                getMetadataOrNull(attr.getStride()));
 }
 
+llvm::DIGenericSubrange *
+DebugTranslation::translateImpl(DIGenericSubrangeAttr attr) {
+  auto getMetadataOrNull = [&](Attribute attr) -> llvm::Metadata * {
+    if (!attr)
+      return nullptr;
+
+    llvm::Metadata *metadata =
+        llvm::TypeSwitch<Attribute, llvm::Metadata *>(attr)
+            .Case([&](LLVM::DIExpressionAttr expr) {
+              return translateExpression(expr);
+            })
+            .Case([&](LLVM::DILocalVariableAttr local) {
+              return translate(local);
+            })
+            .Case<>([&](LLVM::DIGlobalVariableAttr global) {
+              return translate(global);
+            })
+            .Default([&](Attribute attr) { return nullptr; });
+    return metadata;
+  };
+  return llvm::DIGenericSubrange::get(llvmCtx,
+                                      getMetadataOrNull(attr.getCount()),
+                                      getMetadataOrNull(attr.getLowerBound()),
+                                      getMetadataOrNull(attr.getUpperBound()),
+                                      getMetadataOrNull(attr.getStride()));
+}
+
 llvm::DISubroutineType *
 DebugTranslation::translateImpl(DISubroutineTypeAttr attr) {
   // Concatenate the result and argument types into a single array.
@@ -388,7 +415,8 @@ llvm::DINode *DebugTranslation::translate(DINodeAttr attr) {
                      DILabelAttr, DILexicalBlockAttr, DILexicalBlockFileAttr,
                      DILocalVariableAttr, DIModuleAttr, DINamespaceAttr,
                      DINullTypeAttr, DISubprogramAttr, DISubrangeAttr,
-                     DISubroutineTypeAttr, DIStringTypeAttr>(
+                     DIGenericSubrangeAttr, DISubroutineTypeAttr,
+                     DIStringTypeAttr>(
                    [&](auto attr) { return translateImpl(attr); });
 
   if (node && !node->isTemporary())
