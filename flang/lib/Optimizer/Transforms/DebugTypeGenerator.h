@@ -38,18 +38,15 @@ private:
   mlir::LLVM::DITypeAttr convertCharacterType(
     fir::CharacterType charTy, mlir::LLVM::DIFileAttr fileAttr,
     mlir::LLVM::DIScopeAttr scope, mlir::Location loc);
-  mlir::LLVM::DITypeAttr convertHeapType(fir::HeapType heapTy,
-                                         mlir::LLVM::DIFileAttr fileAttr,
-                                         mlir::LLVM::DIScopeAttr scope,
-                                         mlir::Location loc);
   mlir::LLVM::DITypeAttr
   convertBoxedSequenceType(fir::SequenceType seqTy,
                            mlir::LLVM::DIFileAttr fileAttr,
-                           mlir::LLVM::DIScopeAttr scope, mlir::Location loc);
-  mlir::LLVM::DITypeAttr convertPointerType(fir::PointerType ptrTy,
-                                            mlir::LLVM::DIFileAttr fileAttr,
-                                            mlir::LLVM::DIScopeAttr scope,
-                                            mlir::Location loc);
+                           mlir::LLVM::DIScopeAttr scope, mlir::Location loc,
+                           bool genAlloc, bool genAssoc);
+  mlir::LLVM::DITypeAttr convertPointerLikeType(
+    mlir::Type elTy, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc, bool genAlloc,
+    bool genAssoc);
   mlir::ModuleOp module;
   KindMapping kindMapping;
 };

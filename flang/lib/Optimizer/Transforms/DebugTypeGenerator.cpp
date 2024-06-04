@@ -41,9 +41,31 @@ static mlir::LLVM::DITypeAttr genPlaceholderType(mlir::MLIRContext *context) {
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
     fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc, bool genAlloc,
+    bool genAssoc) {
 
   mlir::MLIRContext *context = module.getContext();
+  // FIXME: Assumed rank arrays not supported yet
+  if(seqTy.hasUnknownShape())
+    return genPlaceholderType(context);
+
+  llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+  auto addOp = [&](unsigned opc, llvm::ArrayRef<uint64_t> vals) {
+    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+        context, opc, vals));
+  };
+  auto createExpr = [&]() {
+    return mlir::LLVM::DIExpressionAttr::get(context, ops);
+  };
+  addOp(llvm::dwarf::DW_OP_push_object_address, {});
+  addOp(llvm::dwarf::DW_OP_deref, {});
+  mlir::LLVM::DIExpressionAttr dataLocation = createExpr();
+  addOp(llvm::dwarf::DW_OP_lit0, {});
+  addOp(llvm::dwarf::DW_OP_ne, {});
+  mlir::LLVM::DIExpressionAttr associated = genAssoc ? createExpr() : nullptr;
+  mlir::LLVM::DIExpressionAttr allocated = genAlloc ? createExpr() : nullptr;
+  ops.clear();
+
   llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
   auto intTy = mlir::IntegerType::get(context, 64);
   auto lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
@@ -51,35 +73,27 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
       convertType(seqTy.getEleTy(), fileAttr, scope, loc);
   unsigned offset = 32;
   for (auto dim : seqTy.getShape()) {
-    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_push_object_address, {}));
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_plus_uconst, {offset}));
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_deref, {}));
+    addOp(llvm::dwarf::DW_OP_push_object_address, {});
+    addOp(llvm::dwarf::DW_OP_plus_uconst, {offset});
+    addOp(llvm::dwarf::DW_OP_deref, {});
+    mlir::LLVM::DIExpressionAttr countAttr = createExpr();
+    ops.clear();
     offset += 24;
-    auto countAttr = mlir::LLVM::DIExpressionAttr::get(context, ops);
-    auto subrangeTy = mlir::LLVM::DISubrangeAttr::get(
+    mlir::LLVM::DISubrangeAttr subrangeTy = mlir::LLVM::DISubrangeAttr::get(
         context, nullptr, lowerAttr, countAttr, nullptr);
     elements.push_back(subrangeTy);
   }
-    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_push_object_address, {}));
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_deref, {}));
-    auto dataLocation = mlir::LLVM::DIExpressionAttr::get(context, ops);
-    // Apart from arrays, the `DICompositeTypeAttr` is used for other
-    // things like structure types. Many of its fields which are not
-    // applicable to arrays have been set to some valid default values.
+
+  // Apart from arrays, the `DICompositeTypeAttr` is used for other
+  // things like structure types. Many of its fields which are not
+  // applicable to arrays have been set to some valid default values.
 
     return mlir::LLVM::DICompositeTypeAttr::get(
         context, llvm::dwarf::DW_TAG_array_type, /*recursive id*/ {},
         /* name */ nullptr, /* file */ nullptr, /* line */ 0,
         /* scope */ nullptr, elemTy, mlir::LLVM::DIFlags::Zero,
-        /* sizeInBits */ 0,
-        /*alignInBits*/ 0, elements, dataLocation, nullptr, nullptr, nullptr);
+        /* sizeInBits */ 0, /*alignInBits*/ 0,
+        elements, dataLocation, nullptr, allocated, associated);
 }
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
@@ -135,38 +149,42 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
         charTy.getLen() * 8, 0, nullptr, nullptr, nullptr,
         llvm::dwarf::DW_ATE_unsigned);
   } else {
+  llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+    auto addOp = [&](unsigned opc, llvm::ArrayRef<uint64_t> vals) {
+      ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+          context, opc, vals));
+    };
+    auto createExpr = [&]() {
+      return mlir::LLVM::DIExpressionAttr::get(context, ops);
+    };
+  
+    addOp(llvm::dwarf::DW_OP_push_object_address, {});
+    addOp(llvm::dwarf::DW_OP_plus_uconst, {8});
+    mlir::LLVM::DIExpressionAttr length = createExpr();
+    ops.clear();
+    addOp(llvm::dwarf::DW_OP_push_object_address, {});
+    addOp(llvm::dwarf::DW_OP_deref, {});
+    mlir::LLVM::DIExpressionAttr location = createExpr();
     std::string name(charTy.getMnemonic());
     name += "(*)";
-    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_push_object_address, {}));
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_plus_uconst, {8}));
-    auto size = mlir::LLVM::DIExpressionAttr::get(context, ops);
-    ops.clear();
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_push_object_address, {}));
-    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
-        context, llvm::dwarf::DW_OP_deref, {}));
-    auto loc = mlir::LLVM::DIExpressionAttr::get(context, ops);
     return mlir::LLVM::DIStringTypeAttr::get(
         context, llvm::dwarf::DW_TAG_string_type,
         mlir::StringAttr::get(context, name), 0, 0, nullptr,
-        size, loc, llvm::dwarf::DW_ATE_unsigned);
+        length, location, llvm::dwarf::DW_ATE_unsigned);
   }
 }
 
-mlir::LLVM::DITypeAttr DebugTypeGenerator::convertHeapType(
-    fir::HeapType heapTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
+mlir::LLVM::DITypeAttr DebugTypeGenerator::convertPointerLikeType(
+    mlir::Type elTy, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc, bool genAlloc,
+    bool genAssoc) {
   // The types which use DIStringType or DICompositeType have builtin
   // mechanism to get the location of the data (using dataLocation field or
   // stringLocationExp field.). For other types, we will use pointer style
   // mechanism.
   mlir::MLIRContext *context = module.getContext();
-  mlir::Type elTy = heapTy.getElementType();
   if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
-    return convertBoxedSequenceType(seqTy, fileAttr, scope, loc);
+    return convertBoxedSequenceType(seqTy, fileAttr, scope, loc, genAlloc, genAssoc);
   if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(elTy))
     return convertCharacterType(charTy, fileAttr, scope, loc);
   mlir::LLVM::DITypeAttr elTyAttr = convertType(elTy, fileAttr, scope, loc);
@@ -176,43 +194,12 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertHeapType(
     mlir::emitError(module.getLoc(),
                     "module operation must carry a data layout attribute "
                     "to generate llvm IR from FIR");
-    // signalPassFailure();
     return genPlaceholderType(context);
   }
-  // auto size = dl->getTypeSizeInBits(elTy);
+  uint64_t ptrSize = dl->getTypeSizeInBits(mlir::LLVM::LLVMPointerType::get(context));
   return mlir::LLVM::DIDerivedTypeAttr::get(
       context, llvm::dwarf::DW_TAG_pointer_type,
-      mlir::StringAttr::get(context, ""), elTyAttr, 8,
-      /*alignInBits*/ 0, /* offset */ 0, std::nullopt, nullptr);
-}
-
-mlir::LLVM::DITypeAttr DebugTypeGenerator::convertPointerType(
-    fir::PointerType ptrTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
-  // The types which use DIStringType or DICompositeType have builtin
-  // mechanism to get the location of the data (using dataLocation field or
-  // stringLocationExp field.). For other types, we will use pointer style
-  // mechanism.
-  mlir::MLIRContext *context = module.getContext();
-  mlir::Type elTy = ptrTy.getElementType();
-  if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
-    return convertBoxedSequenceType(seqTy, fileAttr, scope, loc);
-  if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(elTy))
-    return convertCharacterType(charTy, fileAttr, scope, loc);
-  mlir::LLVM::DITypeAttr elTyAttr = convertType(elTy, fileAttr, scope, loc);
-  std::optional<mlir::DataLayout> dl =
-      fir::support::getOrSetDataLayout(module, /*allowDefaultLayout=*/true);
-  if (!dl) {
-    mlir::emitError(module.getLoc(),
-                    "module operation must carry a data layout attribute "
-                    "to generate llvm IR from FIR");
-    // signalPassFailure();
-    return genPlaceholderType(context);
-  }
-  // auto size = dl->getTypeSizeInBits(elTy);
-  return mlir::LLVM::DIDerivedTypeAttr::get(
-      context, llvm::dwarf::DW_TAG_pointer_type,
-      mlir::StringAttr::get(context, ""), elTyAttr, 8,
+      mlir::StringAttr::get(context, ""), elTyAttr, ptrSize,
       /*alignInBits*/ 0, /* offset */ 0, std::nullopt, nullptr);
 }
 
@@ -254,12 +241,16 @@ DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
     return convertCharacterType(charTy, fileAttr, scope, loc);
   } else if (auto boxTy = mlir::dyn_cast_or_null<fir::BoxType>(Ty)) {
     auto elTy = boxTy.getElementType();
-    if (auto heapTy = mlir::dyn_cast_or_null<fir::HeapType>(elTy))
-      return convertHeapType(heapTy, fileAttr, scope, loc);
+    if (auto heapTy = mlir::dyn_cast_or_null<fir::HeapType>(elTy)) {
+      elTy = heapTy.getElementType();
+      return convertPointerLikeType(elTy, fileAttr, scope, loc, true, false);
+    }
     if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
-      return convertBoxedSequenceType(seqTy, fileAttr, scope, loc);
-    if (auto ptrTy = mlir::dyn_cast_or_null<fir::PointerType>(elTy))
-      return convertPointerType(ptrTy, fileAttr, scope, loc);
+      return convertBoxedSequenceType(seqTy, fileAttr, scope, loc, false, false);
+    if (auto ptrTy = mlir::dyn_cast_or_null<fir::PointerType>(elTy)) {
+      elTy = ptrTy.getElementType();
+      return convertPointerLikeType(elTy, fileAttr, scope, loc, false, true);
+    }
     return convertType(elTy, fileAttr, scope, loc);
   } else {
     // FIXME: These types are currently unhandled. We are generating a
