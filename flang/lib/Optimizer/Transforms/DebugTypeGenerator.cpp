@@ -13,6 +13,8 @@
 #define DEBUG_TYPE "flang-debug-type-generator"
 
 #include "DebugTypeGenerator.h"
+#include "../CodeGen/DescriptorModel.h"
+#include "flang/Optimizer/CodeGen/TypeConverter.h"
 #include "flang/Optimizer/Support/DataLayout.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -24,6 +26,38 @@ namespace fir {
 DebugTypeGenerator::DebugTypeGenerator(mlir::ModuleOp m)
     : module(m), kindMapping(getKindMapping(m)) {
   LLVM_DEBUG(llvm::dbgs() << "DITypeAttr generator\n");
+
+  std::optional<mlir::DataLayout> dl =
+      fir::support::getOrSetDataLayout(module, /*allowDefaultLayout=*/true);
+  if (!dl) {
+    mlir::emitError(module.getLoc(),
+                    "module operation must carry a data layout attribute "
+                    "to generate llvm IR from FIR");
+  }
+  mlir::MLIRContext *context = module.getContext();
+
+  ptrSize =
+      dl->getTypeSizeInBits(getDescFieldTypeModel<kAddrPosInBox>()(context));
+  lenSize =
+      dl->getTypeSizeInBits(getDescFieldTypeModel<kElemLenPosInBox>()(context));
+  dimsSize =
+      dl->getTypeSizeInBits(getDescFieldTypeModel<kDimsPosInBox>()(context));
+  dimsOffset = ptrSize;
+  dimsOffset += lenSize;
+  dimsOffset +=
+      dl->getTypeSizeInBits(getDescFieldTypeModel<kVersionPosInBox>()(context));
+  dimsOffset +=
+      dl->getTypeSizeInBits(getDescFieldTypeModel<kRankPosInBox>()(context));
+  dimsOffset +=
+      dl->getTypeSizeInBits(getDescFieldTypeModel<kTypePosInBox>()(context));
+  dimsOffset += dl->getTypeSizeInBits(
+      getDescFieldTypeModel<kAttributePosInBox>()(context));
+  dimsOffset += dl->getTypeSizeInBits(
+      getDescFieldTypeModel<kF18AddendumPosInBox>()(context));
+  lenSize /= 8;
+  dimsOffset /= 8;
+  dimsSize /= 8;
+  lenOffset = ptrSize / 8;
 }
 
 static mlir::LLVM::DITypeAttr genBasicType(mlir::MLIRContext *context,
@@ -67,18 +101,23 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
   ops.clear();
 
   llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
-  auto intTy = mlir::IntegerType::get(context, 64);
-  auto lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, 1));
   mlir::LLVM::DITypeAttr elemTy =
       convertType(seqTy.getEleTy(), fileAttr, scope, loc);
-  unsigned offset = 32;
-  for (auto dim : seqTy.getShape()) {
+  unsigned offset = dimsOffset;
+  for ([[maybe_unused]] auto _ : seqTy.getShape()) {
     addOp(llvm::dwarf::DW_OP_push_object_address, {});
-    addOp(llvm::dwarf::DW_OP_plus_uconst, {offset});
-    addOp(llvm::dwarf::DW_OP_deref, {});
+    addOp(llvm::dwarf::DW_OP_plus_uconst,
+          {offset + ((dimsSize / 3) * kDimExtentPos)});
+    addOp(llvm::dwarf::DW_OP_deref_size, {(dimsSize / 3)});
     mlir::LLVM::DIExpressionAttr countAttr = createExpr();
     ops.clear();
-    offset += 24;
+    addOp(llvm::dwarf::DW_OP_push_object_address, {});
+    addOp(llvm::dwarf::DW_OP_plus_uconst,
+          {offset + ((dimsSize / 3) * kDimLowerBoundPos)});
+    addOp(llvm::dwarf::DW_OP_deref_size, {(dimsSize / 3)});
+    mlir::LLVM::DIExpressionAttr lowerAttr = createExpr();
+    ops.clear();
+    offset += dimsSize;
     mlir::LLVM::DISubrangeAttr subrangeTy = mlir::LLVM::DISubrangeAttr::get(
         context, nullptr, lowerAttr, countAttr, nullptr);
     elements.push_back(subrangeTy);
@@ -159,7 +198,12 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
     };
   
     addOp(llvm::dwarf::DW_OP_push_object_address, {});
-    addOp(llvm::dwarf::DW_OP_plus_uconst, {8});
+    addOp(llvm::dwarf::DW_OP_plus_uconst, {lenOffset});
+    if (lenSize != ptrSize) {
+      addOp(llvm::dwarf::DW_OP_deref_size, {lenSize});
+      addOp(llvm::dwarf::DW_OP_stack_value, {});
+    }
+
     mlir::LLVM::DIExpressionAttr length = createExpr();
     ops.clear();
     addOp(llvm::dwarf::DW_OP_push_object_address, {});
@@ -188,15 +232,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertPointerLikeType(
   if (auto charTy = mlir::dyn_cast_or_null<fir::CharacterType>(elTy))
     return convertCharacterType(charTy, fileAttr, scope, loc);
   mlir::LLVM::DITypeAttr elTyAttr = convertType(elTy, fileAttr, scope, loc);
-  std::optional<mlir::DataLayout> dl =
-      fir::support::getOrSetDataLayout(module, /*allowDefaultLayout=*/true);
-  if (!dl) {
-    mlir::emitError(module.getLoc(),
-                    "module operation must carry a data layout attribute "
-                    "to generate llvm IR from FIR");
-    return genPlaceholderType(context);
-  }
-  uint64_t ptrSize = dl->getTypeSizeInBits(mlir::LLVM::LLVMPointerType::get(context));
+
   return mlir::LLVM::DIDerivedTypeAttr::get(
       context, llvm::dwarf::DW_TAG_pointer_type,
       mlir::StringAttr::get(context, ""), elTyAttr, ptrSize,

@@ -49,6 +49,11 @@ private:
     bool genAssoc);
   mlir::ModuleOp module;
   KindMapping kindMapping;
+  size_t ptrSize;
+  size_t lenSize;
+  size_t lenOffset;
+  size_t dimsSize;
+  size_t dimsOffset;
 };
 
 } // namespace fir
