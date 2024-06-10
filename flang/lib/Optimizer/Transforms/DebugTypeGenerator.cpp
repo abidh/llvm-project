@@ -150,6 +150,44 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
       /* rank */ nullptr, allocated, associated);
 }
 
+mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
+    fir::CharacterType charTy, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
+  mlir::MLIRContext *context = module.getContext();
+  std::string name(charTy.getMnemonic());
+  if (charTy.hasConstantLen()) {
+    name += "(" + std::to_string(charTy.charTy.getLen()) + ")";
+    return mlir::LLVM::DIStringTypeAttr::get(
+        context, llvm::dwarf::DW_TAG_string_type,
+        mlir::StringAttr::get(context, name),
+        charTy.getLen() * 8, 0, nullptr, nullptr, nullptr,
+        llvm::dwarf::DW_ATE_unsigned);
+  } else {
+    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+    auto addOp = [&](unsigned opc, llvm::ArrayRef<uint64_t> vals) {
+      ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+          context, opc, vals));
+    };
+    auto createExpr = [&]() {
+      return mlir::LLVM::DIExpressionAttr::get(context, ops);
+    };
+
+    addOp(llvm::dwarf::DW_OP_push_object_address, {});
+    addOp(llvm::dwarf::DW_OP_plus_uconst, {lenOffset});
+    mlir::LLVM::DIExpressionAttr length = createExpr();
+    ops.clear();
+
+    addOp(llvm::dwarf::DW_OP_push_object_address, {});
+    addOp(llvm::dwarf::DW_OP_deref, {});
+    mlir::LLVM::DIExpressionAttr location = createExpr();
+    name += "(*)";
+    return mlir::LLVM::DIStringTypeAttr::get(
+        context, llvm::dwarf::DW_TAG_string_type,
+        mlir::StringAttr::get(context, name), 0, 0, nullptr,
+        length, location, llvm::dwarf::DW_ATE_unsigned);
+  }
+}
+
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
     fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
     mlir::LLVM::DIScopeAttr scope, mlir::Location loc) {
