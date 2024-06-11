@@ -179,6 +179,16 @@ public:
                   mlir::ConversionPatternRewriter &rewriter) const override {
     auto memRef = adaptor.getOperands()[0];
     if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(declareOp.getLoc())) {
+      for (auto l : fusedLoc.getLocations())
+        if (auto fl = mlir::dyn_cast<mlir::FusedLoc>(l)) {
+          if (auto varAttr =
+                  mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(
+                      fl.getMetadata())) {
+            auto param = adaptor.getOperands()[1];
+            rewriter.create<mlir::LLVM::DbgValueOp>(param.getLoc(), param,
+                                                    varAttr, nullptr);
+          }
+        }
       if (auto varAttr =
               mlir::dyn_cast_or_null<mlir::LLVM::DILocalVariableAttr>(
                   fusedLoc.getMetadata())) {

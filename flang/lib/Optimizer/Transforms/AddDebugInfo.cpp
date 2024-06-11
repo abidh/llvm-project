@@ -105,8 +105,9 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
     argNo = arg.getArgNumber() + 1;
   }
 
-  auto tyAttr = typeGen.convertType(fir::unwrapRefType(declOp.getType()),
-                                    fileAttr, scopeAttr, declOp.getLoc());
+  auto tyAttr =
+      typeGen.convertType(fir::unwrapRefType(declOp.getType()), fileAttr,
+                          scopeAttr, declOp.getLoc(), declOp);
 
   auto localVarAttr = mlir::LLVM::DILocalVariableAttr::get(
       context, scopeAttr, mlir::StringAttr::get(context, result.second.name),
@@ -170,7 +171,7 @@ void AddDebugInfoPass::handleGlobalOp(fir::GlobalOp globalOp,
                                 line - 1, !globalOp.isInitialized());
 
   mlir::LLVM::DITypeAttr diType = typeGen.convertType(
-      globalOp.getType(), fileAttr, scope, globalOp.getLoc());
+      globalOp.getType(), fileAttr, scope, globalOp.getLoc(), nullptr);
   auto gvAttr = mlir::LLVM::DIGlobalVariableAttr::get(
       context, scope, mlir::StringAttr::get(context, result.second.name),
       mlir::StringAttr::get(context, globalOp.getName()), fileAttr, line,
@@ -249,13 +250,13 @@ void AddDebugInfoPass::runOnOperation() {
     llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
     fir::DebugTypeGenerator typeGen(module);
     for (auto resTy : funcOp.getResultTypes()) {
-      auto tyAttr =
-          typeGen.convertType(resTy, fileAttr, cuAttr, funcOp.getLoc());
+      auto tyAttr = typeGen.convertType(resTy, fileAttr, cuAttr,
+                                        funcOp.getLoc(), nullptr);
       types.push_back(tyAttr);
     }
     for (auto inTy : funcOp.getArgumentTypes()) {
       auto tyAttr = typeGen.convertType(fir::unwrapRefType(inTy), fileAttr,
-                                        cuAttr, funcOp.getLoc());
+                                        cuAttr, funcOp.getLoc(), nullptr);
       types.push_back(tyAttr);
     }
 
