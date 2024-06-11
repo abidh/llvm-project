@@ -62,6 +62,8 @@ DebugTypeGenerator::DebugTypeGenerator(mlir::ModuleOp m)
   mlir::Type llvmDimsType = getDescFieldTypeModel<kDimsPosInBox>()(context);
   dimsOffset = getComponentOffset<kDimsPosInBox>(*dl, context, llvmDimsType);
   dimsSize = dl->getTypeSize(llvmDimsType);
+  mlir::Type llvmSizeType = getDescFieldTypeModel<kElemLenPosInBox>()(context);
+  sizeOffset = getComponentOffset<kElemLenPosInBox>(*dl, context, llvmSizeType);
 }
 
 static mlir::LLVM::DITypeAttr genBasicType(mlir::MLIRContext *context,
@@ -159,8 +161,9 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
     name += "(" + std::to_string(charTy.charTy.getLen()) + ")";
     return mlir::LLVM::DIStringTypeAttr::get(
         context, llvm::dwarf::DW_TAG_string_type,
-        mlir::StringAttr::get(context, name),
-        charTy.getLen() * 8, 0, nullptr, nullptr, nullptr,
+        mlir::StringAttr::get(context, name), charTy.getLen() * 8,
+        /* alignInBits */ 0, /* stringLength */ nullptr,
+        /* stringLengthExp */ nullptr, /* stringLocationExp */ nullptr,
         llvm::dwarf::DW_ATE_unsigned);
   } else {
     llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
@@ -173,18 +176,21 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
     };
 
     addOp(llvm::dwarf::DW_OP_push_object_address, {});
-    addOp(llvm::dwarf::DW_OP_plus_uconst, {lenOffset});
-    mlir::LLVM::DIExpressionAttr length = createExpr();
+    addOp(llvm::dwarf::DW_OP_plus_uconst, {sizeOffset});
+    mlir::LLVM::DIExpressionAttr lenExp =
+        mlir::LLVM::DIExpressionAttr::get(context, ops);
     ops.clear();
 
     addOp(llvm::dwarf::DW_OP_push_object_address, {});
     addOp(llvm::dwarf::DW_OP_deref, {});
-    mlir::LLVM::DIExpressionAttr location = createExpr();
+    mlir::LLVM::DIExpressionAttr locExp =
+        mlir::LLVM::DIExpressionAttr::get(context, ops);
     name += "(*)";
     return mlir::LLVM::DIStringTypeAttr::get(
         context, llvm::dwarf::DW_TAG_string_type,
-        mlir::StringAttr::get(context, name), 0, 0, nullptr,
-        length, location, llvm::dwarf::DW_ATE_unsigned);
+        mlir::StringAttr::get(context, name), /* sizeInBits */ 0,
+        /* alignInBits */ 0, /*stringLength*/ nullptr, lenExp, locExp,
+        llvm::dwarf::DW_ATE_unsigned);
   }
 }
 
