@@ -44,6 +44,7 @@
 #include "llvm/IR/PassInstrumentation.h"
 #include "llvm/IR/ReplaceConstant.h"
 #include "llvm/IR/Value.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -6556,6 +6557,23 @@ static Function *createOutlinedFunction(
 
   // Insert target deinit call in the device compilation pass.
   Builder.restoreIP(CBFunc(Builder.saveIP(), Builder.saveIP()));
+  for (BasicBlock &BB : *Func) {
+    for (Instruction &I : BB) {
+      if (auto *DB = dyn_cast<llvm::DbgDeclareInst>(&I)) {
+        auto old = DB->getVariable();
+        auto LV = llvm::DILocalVariable::get(
+      Builder.getContext(), Func->getSubprogram(), old->getName(),
+      old->getFile(), old->getLine(), old->getType(),
+      old->getArg(), old->getFlags(), 
+      old->getAlignInBits(), old->getAnnotations());
+      DB->setVariable(LV);
+
+        /*auto LV = DB->getVariable();
+        if (dl && dl->getScope())
+          LV->setScope(dl->getScope());*/
+      }
+    }
+  }
   if (OMPBuilder.Config.isTargetDevice())
     OMPBuilder.createTargetDeinit(Builder);
 
