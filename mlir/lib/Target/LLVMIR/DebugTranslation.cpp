@@ -264,10 +264,17 @@ llvm::DINode *
 DebugTranslation::translateRecursive(DIRecursiveTypeAttrInterface attr) {
   DistinctAttr recursiveId = attr.getRecId();
   if (auto *iter = recursiveNodeMap.find(recursiveId);
-      iter != recursiveNodeMap.end()) {
+      iter != recursiveNodeMap.end())
     return iter->second;
+
+  if (attr.getIsRecSelf()) {
+    if (auto compAttr = dyn_cast<DICompositeTypeAttr>(attr)) {
+      auto temporary = translateTemporaryImpl(compAttr).release();
+      UnhandledRecursiveNodeMap.try_emplace(recursiveId, temporary);
+      return temporary;
+    } else
+      assert(!attr.getIsRecSelf() && "unbound DI recursive self reference");
   }
-  assert(!attr.getIsRecSelf() && "unbound DI recursive self reference");
 
   auto setRecursivePlaceholder = [&](llvm::DINode *placeholder) {
     recursiveNodeMap.try_emplace(recursiveId, placeholder);
@@ -282,6 +289,12 @@ DebugTranslation::translateRecursive(DIRecursiveTypeAttrInterface attr) {
             // avoid handling the recursive interface again.
             auto *concrete = translateImpl(attr);
             temporary->replaceAllUsesWith(concrete);
+            if (auto *iter = UnhandledRecursiveNodeMap.find(recursiveId);
+                      iter != UnhandledRecursiveNodeMap.end()) {
+              iter->second->replaceAllUsesWith(concrete);
+              UnhandledRecursiveNodeMap.erase(iter);
+              llvm::DICompositeType::deleteTemporary(iter->second);
+            }
             return concrete;
           })
           .Case<DISubprogramAttr>([&](auto attr) {

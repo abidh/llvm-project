@@ -127,6 +127,7 @@ private:
 
   /// A mapping between recursive ID and the translated DINode.
   llvm::MapVector<DistinctAttr, llvm::DINode *> recursiveNodeMap;
+  llvm::MapVector<DistinctAttr, llvm::DINode *> UnhandledRecursiveNodeMap;
 
   /// A mapping between a distinct ID and the translated LLVM metadata node.
   /// This helps identify attrs that should translate into the same LLVM debug
