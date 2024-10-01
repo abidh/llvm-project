@@ -282,6 +282,13 @@ DISubrangeAttr DebugImporter::translateImpl(llvm::DISubrange *node) {
                              getAttrOrNull(node->getStride()));
 }
 
+DICommonBlockAttr DebugImporter::translateImpl(llvm::DICommonBlock *node) {
+  return DICommonBlockAttr::get(context, translate(node->getScope()),
+                                getStringAttrOrNull(node->getRawName()),
+                                translate(node->getDecl()),
+                                translate(node->getFile()), node->getLineNo());
+}
+
 DISubroutineTypeAttr
 DebugImporter::translateImpl(llvm::DISubroutineType *node) {
   SmallVector<DITypeAttr> types;
