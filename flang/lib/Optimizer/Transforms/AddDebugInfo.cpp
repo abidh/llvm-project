@@ -59,10 +59,14 @@ public:
 
 private:
   llvm::StringMap<mlir::LLVM::DIModuleAttr> moduleMap;
+  llvm::StringMap<mlir::LLVM::DICommonBlockAttr> commonBlockMap;
 
   mlir::LLVM::DIModuleAttr getOrCreateModuleAttr(
       const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
       mlir::LLVM::DIScopeAttr scope, unsigned line, bool decl);
+  mlir::LLVM::DICommonBlockAttr getOrCreateCommonBlockAttr(
+    const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, unsigned line);
 
   void handleGlobalOp(fir::GlobalOp glocalOp, mlir::LLVM::DIFileAttr fileAttr,
                       mlir::LLVM::DIScopeAttr scope,
@@ -111,6 +115,66 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   if (result.second.procs.empty())
     return;
 
+  auto op1 = declOp.getMemref().getDefiningOp();
+  if (auto conOp = mlir::dyn_cast_if_present<fir::ConvertOp>(op1)) {
+    if (auto cordOp = mlir::dyn_cast_if_present<fir::CoordinateOp>(
+            conOp.getValue().getDefiningOp())) {
+      if (auto conOp2 = mlir::dyn_cast_if_present<fir::ConvertOp>(
+              cordOp.getRef().getDefiningOp())) {
+        if (auto addrOfOp = mlir::dyn_cast_if_present<fir::AddrOfOp>(
+                conOp2.getValue().getDefiningOp())) {
+          auto sym = addrOfOp.getSymbol();
+          // llvm::errs() << "Sym = " << sym.getRootReference() << "\n";
+          if (auto global =
+                  symbolTable->lookup<fir::GlobalOp>(sym.getRootReference())) {
+            if (/*!debugInfoIsAlreadySet(global.getLoc())*/true) {
+              if (auto optLink = global.getLinkName()) {
+                if (*optLink == "common") {
+                  mlir::Location loc = global.getLoc();
+                  auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc);
+                  while (fusedLoc) {
+                    if (auto gvExprAttr = mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableExpressionAttr>(fusedLoc.getMetadata())) {
+                      if (gvExprAttr.getVar().getName() == result.second.name)
+                        return;
+                      loc = fusedLoc.getLocations()[0];
+                      fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc);
+                    } else
+                      return;
+                  }
+                mlir::LLVM::DISubprogramAttr sp = mlir::dyn_cast_if_present<mlir::LLVM::DISubprogramAttr>(scopeAttr);
+                // Modules are generated at compile unit scope
+                if (sp)
+                  scopeAttr = sp.getCompileUnit();
+                  unsigned line = getLineFromLoc(global.getLoc());
+                  auto commBlock = getOrCreateCommonBlockAttr(sym.getRootReference().str(), fileAttr, scopeAttr, line);
+                  /*auto commBlock = mlir::LLVM::DICommonBlockAttr::get(
+                      context, scopeAttr, sym.getRootReference(), nullptr, fileAttr,
+                      line);*/
+                  mlir::LLVM::DITypeAttr diType = typeGen.convertType(
+                      declOp.getType(), fileAttr, scopeAttr, declOp);
+                  line = getLineFromLoc(declOp.getLoc());
+                  auto gvAttr = mlir::LLVM::DIGlobalVariableAttr::get(
+                      context, commBlock,
+                      mlir::StringAttr::get(context, result.second.name),
+                      declOp.getUniqName(),
+                      fileAttr, line, diType, /*isLocalToUnit*/ true,
+                      /*isDefinition*/ true, /* alignInBits*/ 0);
+                  auto dbgExpr =
+                      mlir::LLVM::DIGlobalVariableExpressionAttr::get(
+                          global.getContext(), gvAttr,
+                          mlir::LLVM::DIExpressionAttr());
+                  global->setLoc(
+                      builder.getFusedLoc({global->getLoc()}, dbgExpr));
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // FIXME: There may be cases where an argument is processed a bit before
   // DeclareOp is generated. In that case, DeclareOp may point to an
   // intermediate op and not to BlockArgument.
@@ -134,6 +198,21 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
       fileAttr, getLineFromLoc(declOp.getLoc()), argNo, /* alignInBits*/ 0,
       tyAttr, mlir::LLVM::DIFlags::Zero);
   declOp->setLoc(builder.getFusedLoc({declOp->getLoc()}, localVarAttr));
+}
+
+mlir::LLVM::DICommonBlockAttr AddDebugInfoPass::getOrCreateCommonBlockAttr(
+    const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, unsigned line) {
+  mlir::MLIRContext *context = &getContext();
+  mlir::LLVM::DICommonBlockAttr cbAttr;
+  if (auto iter{commonBlockMap.find(name)}; iter != commonBlockMap.end()) {
+    cbAttr = iter->getValue();
+  } else {
+    cbAttr = mlir::LLVM::DICommonBlockAttr::get(
+        context, scope, mlir::StringAttr::get(context, name), nullptr, fileAttr, line);
+    commonBlockMap[name] = cbAttr;
+  }
+  return cbAttr;
 }
 
 // The `module` does not have a first class representation in the `FIR`. We

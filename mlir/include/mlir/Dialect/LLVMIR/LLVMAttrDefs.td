@@ -471,6 +471,14 @@ def LLVM_DIGlobalVariableExpressionAttr
   let constBuilderCall = "$0";
 }
 
+def LLVM_DIGlobalVariableExpressionAttrList
+    : LLVM_Attr<"DIGlobalVariableExpressionList", "di_global_variable_expression_list"> {
+  let parameters = (ins
+    OptionalArrayRefParameter<"DIGlobalVariableExpressionAttr">:$exprs
+  );
+  let assemblyFormat = "`<` struct(params) `>`";
+}
+
 //===----------------------------------------------------------------------===//
 // DIGlobalVariableAttr
 //===----------------------------------------------------------------------===//
