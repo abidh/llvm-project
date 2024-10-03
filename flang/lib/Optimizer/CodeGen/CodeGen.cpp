@@ -2784,27 +2784,11 @@ struct GlobalOpConversion : public fir::FIROpConversion<fir::GlobalOp> {
                   mlir::ConversionPatternRewriter &rewriter) const override {
 
     //mlir::LLVM::DIGlobalVariableExpressionAttr dbgExpr;
-    llvm::SmallVector<mlir::LLVM::DIGlobalVariableExpressionAttr> dbgExpr;
+    mlir::ArrayAttr arrayAttr = nullptr;
     if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(global.getLoc())) {
-      if (auto gvAttr =
-              mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableAttr>(
+      if (auto gvExprAttr = mlir::dyn_cast_or_null<mlir::ArrayAttr>(
                   fusedLoc.getMetadata())) {
-        dbgExpr = mlir::LLVM::DIGlobalVariableExpressionAttr::get(
-            global.getContext(), gvAttr, mlir::LLVM::DIExpressionAttr());
-      } else if (auto gvExprAttr =
-              mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableExpressionAttr>(
-                  fusedLoc.getMetadata())) {
-        while(gvExprAttr) {
-          dbgExpr.push_back(gvExprAttr);
-          mlir::Location loc = fusedLoc.getLocations()[0];
-          if (fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(global.getLoc())) {
-            if (gvExprAttr =
-              mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableExpressionAttr>(
-                  fusedLoc.getMetadata()))
-                  continue;
-          }
-          break;
-        }
+        arrayAttr = gvExprAttr;
       }
     }
 
@@ -2820,7 +2804,7 @@ struct GlobalOpConversion : public fir::FIROpConversion<fir::GlobalOp> {
     llvm::ArrayRef<mlir::NamedAttribute> attrs;
     auto g = rewriter.create<mlir::LLVM::GlobalOp>(
         loc, tyAttr, isConst, linkage, global.getSymName(), initAttr, 0, 0,
-        false, false, comdat, attrs, dbgExpr);
+        false, false, comdat, attrs, arrayAttr);
 
     if (global.getAlignment() && *global.getAlignment() > 0)
       g.setAlignment(*global.getAlignment());
