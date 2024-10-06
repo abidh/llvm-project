@@ -143,7 +143,7 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
                       context, scopeAttr, sym.getRootReference(), nullptr, fileAttr,
                       line);*/
                   mlir::LLVM::DITypeAttr diType = typeGen.convertType(
-                      declOp.getType(), fileAttr, scopeAttr, declOp);
+                      fir::unwrapRefType(declOp.getType()), fileAttr, scopeAttr, declOp);
                   line = getLineFromLoc(declOp.getLoc());
                   auto gvAttr = mlir::LLVM::DIGlobalVariableAttr::get(
                       context, commBlock,
