@@ -2089,7 +2089,7 @@ void GlobalOp::build(OpBuilder &builder, OperationState &result, Type type,
                      Attribute value, uint64_t alignment, unsigned addrSpace,
                      bool dsoLocal, bool threadLocal, SymbolRefAttr comdat,
                      ArrayRef<NamedAttribute> attrs,
-                     ArrayRef<DIGlobalVariableExpressionAttr> dbgExpr) {
+                     DIGlobalVariableExpressionAttr dbgExpr) {
   result.addAttribute(getSymNameAttrName(result.name),
                       builder.getStringAttr(name));
   result.addAttribute(getGlobalTypeAttrName(result.name), TypeAttr::get(type));
@@ -2121,10 +2121,8 @@ void GlobalOp::build(OpBuilder &builder, OperationState &result, Type type,
                         builder.getI32IntegerAttr(addrSpace));
   result.attributes.append(attrs.begin(), attrs.end());
 
-  for (auto de: dbgExpr) {
-    if (de)
-      result.addAttribute(getDbgExprAttrName(result.name), de);
-  }
+  if (dbgExpr)
+    result.addAttribute(getDbgExprAttrName(result.name), dbgExpr);
 
   result.addRegion();
 }

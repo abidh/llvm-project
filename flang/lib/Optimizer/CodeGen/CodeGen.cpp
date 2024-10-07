@@ -2783,28 +2783,13 @@ struct GlobalOpConversion : public fir::FIROpConversion<fir::GlobalOp> {
   matchAndRewrite(fir::GlobalOp global, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
 
-    //mlir::LLVM::DIGlobalVariableExpressionAttr dbgExpr;
-    llvm::SmallVector<mlir::LLVM::DIGlobalVariableExpressionAttr> dbgExpr;
+    mlir::LLVM::DIGlobalVariableExpressionAttr dbgExpr;
     if (auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(global.getLoc())) {
       if (auto gvAttr =
               mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableAttr>(
                   fusedLoc.getMetadata())) {
         dbgExpr = mlir::LLVM::DIGlobalVariableExpressionAttr::get(
             global.getContext(), gvAttr, mlir::LLVM::DIExpressionAttr());
-      } else if (auto gvExprAttr =
-              mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableExpressionAttr>(
-                  fusedLoc.getMetadata())) {
-        while(gvExprAttr) {
-          dbgExpr.push_back(gvExprAttr);
-          mlir::Location loc = fusedLoc.getLocations()[0];
-          if (fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(global.getLoc())) {
-            if (gvExprAttr =
-              mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableExpressionAttr>(
-                  fusedLoc.getMetadata()))
-                  continue;
-          }
-          break;
-        }
       }
     }
 
