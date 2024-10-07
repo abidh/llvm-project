@@ -900,14 +900,18 @@ LogicalResult ModuleImport::convertGlobal(llvm::GlobalVariable *globalVar) {
 
   // Get the global expression associated with this global variable and convert
   // it.
-  DIGlobalVariableExpressionAttr globalExpressionAttr;
+  SmallVector<Attribute> globalExpressionAttr;
   SmallVector<llvm::DIGlobalVariableExpression *> globalExpressions;
   globalVar->getDebugInfo(globalExpressions);
 
   // There should only be a single global expression.
-  if (!globalExpressions.empty())
-    globalExpressionAttr =
-        debugImporter->translateGlobalVariableExpression(globalExpressions[0]);
+  // if (!globalExpressions.empty())
+  for (auto ge : globalExpressions) {
+    DIGlobalVariableExpressionAttr geAttr =
+        debugImporter->translateGlobalVariableExpression(ge);
+    globalExpressionAttr.push_back(geAttr);
+  }
+  auto arrayAttr = ArrayAttr::get(context, globalExpressionAttr);
 
   // Workaround to support LLVM's nameless globals. MLIR, in contrast to LLVM,
   // always requires a symbol name.
@@ -928,7 +932,7 @@ LogicalResult ModuleImport::convertGlobal(llvm::GlobalVariable *globalVar) {
       valueAttr, alignment, /*addr_space=*/globalVar->getAddressSpace(),
       /*dso_local=*/globalVar->isDSOLocal(),
       /*thread_local=*/globalVar->isThreadLocal(), /*comdat=*/SymbolRefAttr(),
-      /*attrs=*/ArrayRef<NamedAttribute>(), /*dbgExpr=*/globalExpressionAttr);
+      /*attrs=*/ArrayRef<NamedAttribute>(), /*dbgExpr=*/arrayAttr);
   globalInsertionOp = globalOp;
 
   if (globalVar->hasInitializer() && !valueAttr) {
