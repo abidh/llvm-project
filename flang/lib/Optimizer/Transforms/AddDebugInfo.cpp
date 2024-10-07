@@ -60,7 +60,6 @@ public:
 private:
   llvm::StringMap<mlir::LLVM::DIModuleAttr> moduleMap;
   llvm::StringMap<mlir::LLVM::DICommonBlockAttr> commonBlockMap;
-  llvm::DenseMap<fir::GlobalOp, llvm::SmallVector<mlir::Attribute>> geMap;
 
   mlir::LLVM::DIModuleAttr getOrCreateModuleAttr(
       const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
@@ -116,12 +115,10 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   if (result.second.procs.empty())
     return;
 
-  std::optional<std::int64_t> optint;
   auto op1 = declOp.getMemref().getDefiningOp();
   if (auto conOp = mlir::dyn_cast_if_present<fir::ConvertOp>(op1)) {
     if (auto cordOp = mlir::dyn_cast_if_present<fir::CoordinateOp>(
             conOp.getValue().getDefiningOp())) {
-      optint = fir::getIntIfConstant(cordOp.getOperand(1));
       if (auto conOp2 = mlir::dyn_cast_if_present<fir::ConvertOp>(
               cordOp.getRef().getDefiningOp())) {
         if (auto addrOfOp = mlir::dyn_cast_if_present<fir::AddrOfOp>(
@@ -130,9 +127,20 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
           // llvm::errs() << "Sym = " << sym.getRootReference() << "\n";
           if (auto global =
                   symbolTable->lookup<fir::GlobalOp>(sym.getRootReference())) {
-            if (!debugInfoIsAlreadySet(global.getLoc())) {
+            if (/*!debugInfoIsAlreadySet(global.getLoc())*/true) {
               if (auto optLink = global.getLinkName()) {
                 if (*optLink == "common") {
+                  mlir::Location loc = global.getLoc();
+                  auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc);
+                  while (fusedLoc) {
+                    if (auto gvExprAttr = mlir::dyn_cast_or_null<mlir::LLVM::DIGlobalVariableExpressionAttr>(fusedLoc.getMetadata())) {
+                      if (gvExprAttr.getVar().getName() == result.second.name)
+                        return;
+                      loc = fusedLoc.getLocations()[0];
+                      fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(loc);
+                    } else
+                      return;
+                  }
                 mlir::LLVM::DISubprogramAttr sp = mlir::dyn_cast_if_present<mlir::LLVM::DISubprogramAttr>(scopeAttr);
                 // Modules are generated at compile unit scope
                 if (sp)
@@ -151,18 +159,12 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
                       declOp.getUniqName(),
                       fileAttr, line, diType, /*isLocalToUnit*/ true,
                       /*isDefinition*/ true, /* alignInBits*/ 0);
-                  mlir::LLVM::DIExpressionAttr expr;
-                  if (optint && *optint != 0) {
-                    llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
-                    ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(context, llvm::dwarf::DW_OP_plus_uconst, *optint));
-                    expr = mlir::LLVM::DIExpressionAttr::get(context, ops);
-                  }
                   auto dbgExpr =
                       mlir::LLVM::DIGlobalVariableExpressionAttr::get(
-                          global.getContext(), gvAttr, expr);
-                  geMap[global].push_back(dbgExpr);
-                  //global->setLoc(
-                  //    builder.getFusedLoc({global->getLoc()}, dbgExpr));
+                          global.getContext(), gvAttr,
+                          mlir::LLVM::DIExpressionAttr());
+                  global->setLoc(
+                      builder.getFusedLoc({global->getLoc()}, dbgExpr));
                   return;
                 }
               }
@@ -483,12 +485,6 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     if (&funcOp.front() == declOp->getBlock())
       handleDeclareOp(declOp, fileAttr, spAttr, typeGen, symbolTable);
   });
-  for (auto [global, exprs]: geMap) {
-    auto arrayAttr = mlir::ArrayAttr::get(context, exprs);
-    global->setLoc(builder.getFusedLoc({global.getLoc()}, arrayAttr));
-  }
-  geMap.clear();
-  
 }
 
 void AddDebugInfoPass::runOnOperation() {
