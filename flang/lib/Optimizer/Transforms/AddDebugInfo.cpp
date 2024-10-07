@@ -130,15 +130,17 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
           // llvm::errs() << "Sym = " << sym.getRootReference() << "\n";
           if (auto global =
                   symbolTable->lookup<fir::GlobalOp>(sym.getRootReference())) {
-            if (!debugInfoIsAlreadySet(global.getLoc())) {
+            //if (!debugInfoIsAlreadySet(global.getLoc())) {
               if (auto optLink = global.getLinkName()) {
                 if (*optLink == "common") {
-                mlir::LLVM::DISubprogramAttr sp = mlir::dyn_cast_if_present<mlir::LLVM::DISubprogramAttr>(scopeAttr);
+                //mlir::LLVM::DISubprogramAttr sp = mlir::dyn_cast_if_present<mlir::LLVM::DISubprogramAttr>(scopeAttr);
                 // Modules are generated at compile unit scope
-                if (sp)
-                  scopeAttr = sp.getCompileUnit();
+                //if (sp)
+                  //scopeAttr = sp.getCompileUnit();
                   unsigned line = getLineFromLoc(global.getLoc());
-                  auto commBlock = getOrCreateCommonBlockAttr(sym.getRootReference().str(), fileAttr, scopeAttr, line);
+                  std::string commonName(sym.getRootReference().str());
+                  commonName.pop_back();
+                  auto commBlock = getOrCreateCommonBlockAttr(commonName, fileAttr, scopeAttr, line);
                   /*auto commBlock = mlir::LLVM::DICommonBlockAttr::get(
                       context, scopeAttr, sym.getRootReference(), nullptr, fileAttr,
                       line);*/
@@ -166,7 +168,7 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
                   return;
                 }
               }
-            }
+            //}
           }
         }
       }
@@ -483,11 +485,6 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     if (&funcOp.front() == declOp->getBlock())
       handleDeclareOp(declOp, fileAttr, spAttr, typeGen, symbolTable);
   });
-  for (auto [global, exprs]: geMap) {
-    auto arrayAttr = mlir::ArrayAttr::get(context, exprs);
-    global->setLoc(builder.getFusedLoc({global.getLoc()}, arrayAttr));
-  }
-  geMap.clear();
   
 }
 
@@ -540,7 +537,14 @@ void AddDebugInfoPass::runOnOperation() {
 
   module.walk([&](mlir::func::FuncOp funcOp) {
     handleFuncOp(funcOp, fileAttr, cuAttr, typeGen, &symbolTable);
+    commonBlockMap.clear();
   });
+  mlir::OpBuilder builder(context);
+  for (auto [global, exprs]: geMap) {
+    auto arrayAttr = mlir::ArrayAttr::get(context, exprs);
+    global->setLoc(builder.getFusedLoc({global.getLoc()}, arrayAttr));
+  }
+  geMap.clear();
   // Process any global which was not processed through DeclareOp.
   if (debugLevel == mlir::LLVM::DIEmissionKind::Full) {
     // Process 'GlobalOp' only if full debug info is requested.

@@ -1082,7 +1082,7 @@ LogicalResult ModuleTranslation::convertGlobals() {
             scope = mod->getScope();
           else if (auto *cb = dyn_cast_if_present<llvm::DICommonBlock>(scope))
             scope = cb->getScope();
-          else if (auto *sp = dyn_cast_if_present<llvm::DISubprogram>(scope))
+          if (auto *sp = dyn_cast_if_present<llvm::DISubprogram>(scope))
             scope = sp->getUnit();
 
           // Get the compile unit (scope) of the the global variable.
