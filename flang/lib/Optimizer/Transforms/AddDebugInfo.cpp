@@ -309,7 +309,12 @@ void AddDebugInfoPass::handleGlobalOp(fir::GlobalOp globalOp,
       mlir::StringAttr::get(context, globalOp.getName()), fileAttr, line,
       diType, /*isLocalToUnit*/ false,
       /*isDefinition*/ globalOp.isInitialized(), /* alignInBits*/ 0);
-  globalOp->setLoc(builder.getFusedLoc({globalOp->getLoc()}, gvAttr));
+  auto dbgExpr =
+                      mlir::LLVM::DIGlobalVariableExpressionAttr::get(
+                          globalOp.getContext(), gvAttr, nullptr);
+  auto arrayAttr = mlir::ArrayAttr::get(context, {dbgExpr});
+  globalOp->setLoc(builder.getFusedLoc({globalOp.getLoc()}, arrayAttr));
+  //globalOp->setLoc(builder.getFusedLoc({globalOp->getLoc()}, gvAttr));
 }
 
 void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
