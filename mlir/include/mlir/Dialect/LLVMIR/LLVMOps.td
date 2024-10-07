@@ -1275,7 +1275,7 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
       CArg<"bool", "false">:$thread_local_,
       CArg<"SymbolRefAttr", "{}">:$comdat,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs,
-      CArg<"DIGlobalVariableExpressionAttr", "{}">:$dbgExpr)>
+      CArg<"ArrayRef<DIGlobalVariableExpressionAttr>", "{}">:$dbgExpr)>
   ];
 
   let extraClassDeclaration = [{
