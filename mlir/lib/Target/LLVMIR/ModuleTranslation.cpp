@@ -1055,36 +1055,42 @@ LogicalResult ModuleTranslation::convertGlobals() {
     globalsMapping.try_emplace(op, var);
 
     // Add debug information if present.
-    if (op.getDbgExpr()) {
-      llvm::DIGlobalVariableExpression *diGlobalExpr =
-          debugTranslation->translateGlobalVariableExpression(op.getDbgExpr());
-      llvm::DIGlobalVariable *diGlobalVar = diGlobalExpr->getVariable();
-      var->addDebugInfo(diGlobalExpr);
+    /*if (op.getDbgExpr().has_value() && !getMapping()->empty()) {
+    if (static_cast<int64_t>(getMapping()->size()) != numLoops)
+      return emitOpError() << "mapping attribute size must match op rank";*/
+    if (op.getDbgExpr().has_value()) {
+      for (auto elm : op.getDbgExpr()->getValue()) {
+        if (auto ge = dyn_cast<DIGlobalVariableExpressionAttr>(elm)) {
+          llvm::DIGlobalVariableExpression *diGlobalExpr =
+              debugTranslation->translateGlobalVariableExpression(ge);
+          llvm::DIGlobalVariable *diGlobalVar = diGlobalExpr->getVariable();
+          var->addDebugInfo(diGlobalExpr);
+          // There is no `globals` field in DICompileUnitAttr which can be
+          // directly assigned to DICompileUnit. We have to build the list by
+          // looking at the dbgExpr of all the GlobalOps. The scope of the
+          // variable is used to get the DICompileUnit in which to add it. But
+          // for the languages that support modules, the scope hierarchy can be
+          // variable -> module -> compile unit
+          // If a variable scope points to the module then we use the scope of
+          // the module to get the compile unit. Global variables are also used
+          // for things like static local variables in C and local variables
+          // with the save attribute in Fortran. The scope of the variable is
+          // the parent function. We use the compile unit of the parent function
+          // in this case.
+          llvm::DIScope *scope = diGlobalVar->getScope();
+          if (auto *mod = dyn_cast_if_present<llvm::DIModule>(scope))
+            scope = mod->getScope();
+          if (auto *sp = dyn_cast_if_present<llvm::DISubprogram>(scope))
+            scope = sp->getUnit();
 
-      // There is no `globals` field in DICompileUnitAttr which can be directly
-      // assigned to DICompileUnit. We have to build the list by looking at the
-      // dbgExpr of all the GlobalOps. The scope of the variable is used to get
-      // the DICompileUnit in which to add it. But for the languages that
-      // support modules, the scope hierarchy can be
-      // variable -> module -> compile unit
-      // If a variable scope points to the module then we use the scope of the
-      // module to get the compile unit.
-      // Global variables are also used for things like static local variables
-      // in C and local variables with the save attribute in Fortran. The scope
-      // of the variable is the parent function. We use the compile unit of the
-      // parent function in this case.
-      llvm::DIScope *scope = diGlobalVar->getScope();
-      if (auto *mod = dyn_cast_if_present<llvm::DIModule>(scope))
-        scope = mod->getScope();
-      else if (auto *sp = dyn_cast_if_present<llvm::DISubprogram>(scope))
-        scope = sp->getUnit();
-
-      // Get the compile unit (scope) of the the global variable.
-      if (llvm::DICompileUnit *compileUnit =
-              dyn_cast_if_present<llvm::DICompileUnit>(scope)) {
-        // Update the compile unit with this incoming global variable expression
-        // during the finalizing step later.
-        allGVars[compileUnit].push_back(diGlobalExpr);
+          // Get the compile unit (scope) of the the global variable.
+          if (llvm::DICompileUnit *compileUnit =
+                  dyn_cast_if_present<llvm::DICompileUnit>(scope)) {
+            // Update the compile unit with this incoming global variable
+            // expression during the finalizing step later.
+            allGVars[compileUnit].push_back(diGlobalExpr);
+          }
+        }
       }
     }
   }
