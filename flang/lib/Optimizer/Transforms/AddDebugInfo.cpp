@@ -59,10 +59,16 @@ public:
 
 private:
   llvm::StringMap<mlir::LLVM::DIModuleAttr> moduleMap;
+  llvm::StringMap<mlir::LLVM::DICommonBlockAttr> commonBlockMap;
+  llvm::DenseMap<fir::GlobalOp, llvm::SmallVector<mlir::Attribute>> geMap;
 
   mlir::LLVM::DIModuleAttr getOrCreateModuleAttr(
       const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
       mlir::LLVM::DIScopeAttr scope, unsigned line, bool decl);
+  mlir::LLVM::DICommonBlockAttr
+  getOrCreateCommonBlockAttr(const std::string &name,
+                             mlir::LLVM::DIFileAttr fileAttr,
+                             mlir::LLVM::DIScopeAttr scope, unsigned line);
 
   void handleGlobalOp(fir::GlobalOp glocalOp, mlir::LLVM::DIFileAttr fileAttr,
                       mlir::LLVM::DIScopeAttr scope,
@@ -111,6 +117,68 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   if (result.second.procs.empty())
     return;
 
+  std::optional<std::int64_t> optint;
+  auto op1 = declOp.getMemref().getDefiningOp();
+  if (auto conOp = mlir::dyn_cast_if_present<fir::ConvertOp>(op1)) {
+    if (auto cordOp = mlir::dyn_cast_if_present<fir::CoordinateOp>(
+            conOp.getValue().getDefiningOp())) {
+      optint = fir::getIntIfConstant(cordOp.getOperand(1));
+      if (auto conOp2 = mlir::dyn_cast_if_present<fir::ConvertOp>(
+              cordOp.getRef().getDefiningOp())) {
+        if (auto addrOfOp = mlir::dyn_cast_if_present<fir::AddrOfOp>(
+                conOp2.getValue().getDefiningOp())) {
+          auto sym = addrOfOp.getSymbol();
+          // llvm::errs() << "Sym = " << sym.getRootReference() << "\n";
+          if (auto global =
+                  symbolTable->lookup<fir::GlobalOp>(sym.getRootReference())) {
+            // if (!debugInfoIsAlreadySet(global.getLoc())) {
+            if (auto optLink = global.getLinkName()) {
+              if (*optLink == "common") {
+                // mlir::LLVM::DISubprogramAttr sp =
+                // mlir::dyn_cast_if_present<mlir::LLVM::DISubprogramAttr>(scopeAttr);
+                //  Modules are generated at compile unit scope
+                // if (sp)
+                // scopeAttr = sp.getCompileUnit();
+                unsigned line = getLineFromLoc(global.getLoc());
+                std::string commonName(sym.getRootReference().str());
+                commonName.pop_back();
+                auto commBlock = getOrCreateCommonBlockAttr(
+                    commonName, fileAttr, scopeAttr, line);
+                /*auto commBlock = mlir::LLVM::DICommonBlockAttr::get(
+                    context, scopeAttr, sym.getRootReference(), nullptr,
+                   fileAttr, line);*/
+                mlir::LLVM::DITypeAttr diType =
+                    typeGen.convertType(fir::unwrapRefType(declOp.getType()),
+                                        fileAttr, scopeAttr, declOp);
+                line = getLineFromLoc(declOp.getLoc());
+                auto gvAttr = mlir::LLVM::DIGlobalVariableAttr::get(
+                    context, commBlock,
+                    mlir::StringAttr::get(context, result.second.name),
+                    declOp.getUniqName(), fileAttr, line, diType,
+                    /*isLocalToUnit*/ true,
+                    /*isDefinition*/ true, /* alignInBits*/ 0);
+                mlir::LLVM::DIExpressionAttr expr;
+                if (optint && *optint != 0) {
+                  llvm::SmallVector<mlir::LLVM::DIExpressionElemAttr> ops;
+                  ops.push_back(mlir::LLVM::DIExpressionElemAttr::get(
+                      context, llvm::dwarf::DW_OP_plus_uconst, *optint));
+                  expr = mlir::LLVM::DIExpressionAttr::get(context, ops);
+                }
+                auto dbgExpr = mlir::LLVM::DIGlobalVariableExpressionAttr::get(
+                    global.getContext(), gvAttr, expr);
+                geMap[global].push_back(dbgExpr);
+                // global->setLoc(
+                //     builder.getFusedLoc({global->getLoc()}, dbgExpr));
+                return;
+              }
+            }
+            //}
+          }
+        }
+      }
+    }
+  }
+
   // FIXME: There may be cases where an argument is processed a bit before
   // DeclareOp is generated. In that case, DeclareOp may point to an
   // intermediate op and not to BlockArgument.
@@ -134,6 +202,22 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
       fileAttr, getLineFromLoc(declOp.getLoc()), argNo, /* alignInBits*/ 0,
       tyAttr, mlir::LLVM::DIFlags::Zero);
   declOp->setLoc(builder.getFusedLoc({declOp->getLoc()}, localVarAttr));
+}
+
+mlir::LLVM::DICommonBlockAttr AddDebugInfoPass::getOrCreateCommonBlockAttr(
+    const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
+    mlir::LLVM::DIScopeAttr scope, unsigned line) {
+  mlir::MLIRContext *context = &getContext();
+  mlir::LLVM::DICommonBlockAttr cbAttr;
+  if (auto iter{commonBlockMap.find(name)}; iter != commonBlockMap.end()) {
+    cbAttr = iter->getValue();
+  } else {
+    cbAttr = mlir::LLVM::DICommonBlockAttr::get(
+        context, scope, mlir::StringAttr::get(context, name), nullptr, fileAttr,
+        line);
+    commonBlockMap[name] = cbAttr;
+  }
+  return cbAttr;
 }
 
 // The `module` does not have a first class representation in the `FIR`. We
@@ -230,7 +314,11 @@ void AddDebugInfoPass::handleGlobalOp(fir::GlobalOp globalOp,
       mlir::StringAttr::get(context, globalOp.getName()), fileAttr, line,
       diType, /*isLocalToUnit*/ false,
       /*isDefinition*/ globalOp.isInitialized(), /* alignInBits*/ 0);
-  globalOp->setLoc(builder.getFusedLoc({globalOp->getLoc()}, gvAttr));
+  auto dbgExpr = mlir::LLVM::DIGlobalVariableExpressionAttr::get(
+      globalOp.getContext(), gvAttr, nullptr);
+  auto arrayAttr = mlir::ArrayAttr::get(context, {dbgExpr});
+  globalOp->setLoc(builder.getFusedLoc({globalOp.getLoc()}, arrayAttr));
+  // globalOp->setLoc(builder.getFusedLoc({globalOp->getLoc()}, gvAttr));
 }
 
 void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
@@ -457,7 +545,14 @@ void AddDebugInfoPass::runOnOperation() {
 
   module.walk([&](mlir::func::FuncOp funcOp) {
     handleFuncOp(funcOp, fileAttr, cuAttr, typeGen, &symbolTable);
+    commonBlockMap.clear();
   });
+  mlir::OpBuilder builder(context);
+  for (auto [global, exprs] : geMap) {
+    auto arrayAttr = mlir::ArrayAttr::get(context, exprs);
+    global->setLoc(builder.getFusedLoc({global.getLoc()}, arrayAttr));
+  }
+  geMap.clear();
   // Process any global which was not processed through DeclareOp.
   if (debugLevel == mlir::LLVM::DIEmissionKind::Full) {
     // Process 'GlobalOp' only if full debug info is requested.
