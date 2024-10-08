@@ -285,8 +285,7 @@ DISubrangeAttr DebugImporter::translateImpl(llvm::DISubrange *node) {
 DICommonBlockAttr DebugImporter::translateImpl(llvm::DICommonBlock *node) {
   return DICommonBlockAttr::get(context, translate(node->getScope()),
                                 getStringAttrOrNull(node->getRawName()),
-                                translate(node->getDecl()),
-                                translate(node->getFile()), node->getLineNo());
+                                translate(node->getDecl()), translate(node->getFile()), node->getLineNo());
 }
 
 DISubroutineTypeAttr
@@ -325,6 +324,8 @@ DINodeAttr DebugImporter::translate(llvm::DINode *node) {
   // Convert the debug metadata if possible.
   auto translateNode = [this](llvm::DINode *node) -> DINodeAttr {
     if (auto *casted = dyn_cast<llvm::DIBasicType>(node))
+      return translateImpl(casted);
+    if (auto *casted = dyn_cast<llvm::DICommonBlock>(node))
       return translateImpl(casted);
     if (auto *casted = dyn_cast<llvm::DICompileUnit>(node))
       return translateImpl(casted);

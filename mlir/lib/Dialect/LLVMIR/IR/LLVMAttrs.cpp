@@ -70,7 +70,7 @@ bool DINodeAttr::classof(Attribute attr) {
 //===----------------------------------------------------------------------===//
 
 bool DIScopeAttr::classof(Attribute attr) {
-  return llvm::isa<DICompileUnitAttr, DICompositeTypeAttr, DIFileAttr,
+  return llvm::isa<DICompileUnitAttr, DICommonBlockAttr, DICompositeTypeAttr, DIFileAttr,
                    DILocalScopeAttr, DIModuleAttr, DINamespaceAttr>(attr);
 }
 
