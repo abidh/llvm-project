@@ -56,13 +56,13 @@ void LLVMDialect::registerAttributes() {
 //===----------------------------------------------------------------------===//
 
 bool DINodeAttr::classof(Attribute attr) {
-  return llvm::isa<DIBasicTypeAttr, DICompileUnitAttr, DICompositeTypeAttr,
-                   DIDerivedTypeAttr, DIFileAttr, DIGlobalVariableAttr,
-                   DIImportedEntityAttr, DILabelAttr, DILexicalBlockAttr,
-                   DILexicalBlockFileAttr, DILocalVariableAttr, DIModuleAttr,
-                   DINamespaceAttr, DINullTypeAttr, DIStringTypeAttr,
-                   DISubprogramAttr, DISubrangeAttr, DISubroutineTypeAttr>(
-      attr);
+  return llvm::isa<DIBasicTypeAttr, DICompileUnitAttr, DICommonBlockAttr,
+                   DICompositeTypeAttr, DIDerivedTypeAttr, DIFileAttr,
+                   DIGlobalVariableAttr, DIImportedEntityAttr, DILabelAttr,
+                   DILexicalBlockAttr, DILexicalBlockFileAttr,
+                   DILocalVariableAttr, DIModuleAttr, DINamespaceAttr,
+                   DINullTypeAttr, DIStringTypeAttr, DISubprogramAttr,
+                   DISubrangeAttr, DISubroutineTypeAttr>(attr);
 }
 
 //===----------------------------------------------------------------------===//

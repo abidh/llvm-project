@@ -1080,6 +1080,8 @@ LogicalResult ModuleTranslation::convertGlobals() {
           llvm::DIScope *scope = diGlobalVar->getScope();
           if (auto *mod = dyn_cast_if_present<llvm::DIModule>(scope))
             scope = mod->getScope();
+          else if (auto *cb = dyn_cast_if_present<llvm::DICommonBlock>(scope))
+            scope = cb->getScope();
           if (auto *sp = dyn_cast_if_present<llvm::DISubprogram>(scope))
             scope = sp->getUnit();
 
