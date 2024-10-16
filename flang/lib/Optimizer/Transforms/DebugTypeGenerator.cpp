@@ -74,6 +74,7 @@ static mlir::LLVM::DITypeAttr genBasicType(mlir::MLIRContext *context,
 }
 
 static mlir::LLVM::DITypeAttr genPlaceholderType(mlir::MLIRContext *context) {
+
   return genBasicType(context, mlir::StringAttr::get(context, "integer"),
                       /*bitSize=*/32, llvm::dwarf::DW_ATE_signed);
 }
@@ -292,8 +293,11 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertRecordType(
   typeCache[Ty] = comAttr;
 
   auto result = fir::NameUniquer::deconstruct(Ty.getName());
-  if (result.first != fir::NameUniquer::NameKind::DERIVED_TYPE)
+  if (result.first != fir::NameUniquer::NameKind::DERIVED_TYPE) {
+    Ty.dump();
+    assert(false);
     return genPlaceholderType(context);
+  }
 
   fir::TypeInfoOp tiOp = symbolTable->lookup<fir::TypeInfoOp>(Ty.getName());
   unsigned line = (tiOp) ? getLineFromLoc(tiOp.getLoc()) : 1;
@@ -524,8 +528,62 @@ DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
       return convertPointerLikeType(ptrTy.getElementType(), fileAttr, scope,
                                     declOp, /*genAllocated=*/false,
                                     /*genAssociated=*/true);
+    if (mlir::isa<mlir::NoneType>(elTy))
+      return convertPointerLikeType(elTy, fileAttr, scope,
+                                    declOp, /*genAllocated=*/false,
+                                    /*genAssociated=*/false);
+      Ty.dump();
+    assert(false);
     return genPlaceholderType(context);
-  } else {
+  } else if (auto classTy = mlir::dyn_cast_or_null<fir::ClassType>(Ty)) {
+    auto elTy = classTy.getEleTy();
+    return convertPointerLikeType(elTy, fileAttr, scope,
+                                    declOp, /*genAllocated=*/false,
+                                    /*genAssociated=*/false);
+  } else if (auto refTy = mlir::dyn_cast_or_null<fir::ReferenceType>(Ty)) {
+    auto elTy = refTy.getEleTy();
+    return convertPointerLikeType(elTy, fileAttr, scope,
+                                    declOp, /*genAllocated=*/false,
+                                    /*genAssociated=*/false);
+  } else if (auto llvmPtrTy = mlir::dyn_cast_or_null<mlir::LLVM::LLVMPointerType>(Ty)) {
+    //auto elTy = llvmPtrTy.getEleTy();
+    return mlir::LLVM::DIBasicTypeAttr::get(context, llvm::dwarf::DW_TAG_base_type, "void", 32, 1);
+    //return convertPointerLikeType(elTy, fileAttr, scope,
+    //                                declOp, /*genAllocated=*/false,
+    //                                /*genAssociated=*/false);
+  } else if (auto llvmPtrTy = mlir::dyn_cast_or_null<fir::LLVMPointerType>(Ty)) {
+    //auto elTy = llvmPtrTy.getEleTy();
+    return mlir::LLVM::DIBasicTypeAttr::get(context, llvm::dwarf::DW_TAG_base_type, "void", 32, 1);
+    //return convertPointerLikeType(elTy, fileAttr, scope,
+    //                                declOp, /*genAllocated=*/false,
+    //                                /*genAssociated=*/false);
+  } else if (auto llvmPtrTy = mlir::dyn_cast_or_null<mlir::TupleType>(Ty)) {
+    return mlir::LLVM::DIBasicTypeAttr::get(context, llvm::dwarf::DW_TAG_base_type, "void", 32, 1);
+  } else if (auto vecTy = mlir::dyn_cast_or_null<fir::VectorType>(Ty)) {
+    auto floatTy = mlir::cast<mlir::FloatType>(vecTy.getEleTy());
+    unsigned bitWidth = floatTy.getWidth();
+    return genBasicType(context, mlir::StringAttr::get(context, "complex"),
+                        bitWidth * 2, llvm::dwarf::DW_ATE_complex_float);
+  } else if (mlir::isa<mlir::NoneType>(Ty)) {
+    return mlir::LLVM::DINullTypeAttr::get(context);
+  } else if (mlir::isa<mlir::IndexType>(Ty)) {
+    return mlir::LLVM::DIBasicTypeAttr::get(context, llvm::dwarf::DW_TAG_base_type, "integer", 64, 1);
+  } else if (mlir::isa<mlir::FunctionType>(Ty)) {
+    return mlir::LLVM::DIBasicTypeAttr::get(context, llvm::dwarf::DW_TAG_base_type, "void", 32, 1);
+  } else if (auto bcTy = mlir::dyn_cast_or_null<fir::BoxCharType>(Ty)) {
+    return convertType(bcTy.getEleTy(), fileAttr, scope, declOp);
+  } else if (auto heapTy = mlir::dyn_cast_or_null<fir::HeapType>(Ty)) {
+      return convertPointerLikeType(heapTy.getElementType(), fileAttr, scope,
+                                    declOp, /*genAllocated=*/true,
+                                    /*genAssociated=*/false);
+  } else if (auto ptrTy = mlir::dyn_cast_or_null<fir::PointerType>(Ty)) {
+      return convertPointerLikeType(ptrTy.getElementType(), fileAttr, scope,
+                                    declOp, /*genAllocated=*/false,
+                                    /*genAssociated=*/true);
+  }
+  else {
+    Ty.dump();
+    assert(false);
     // FIXME: These types are currently unhandled. We are generating a
     // placeholder type to allow us to test supported bits.
     return genPlaceholderType(context);
