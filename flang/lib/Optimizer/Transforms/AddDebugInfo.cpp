@@ -243,6 +243,36 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   // Otherwise, create a fused location.
   if (debugInfoIsAlreadySet(l))
     return;
+  int start = 0
+  /*if (!funcOp.empty()) {  
+    if (!funcOp.front().getArguments().empty()) {
+      mlir::BlockArgument arg = funcOp.front().getArguments()[0];
+    }
+    for (auto arg : funcOp.front().getArguments()) {
+      //argdump();
+      llvm::errs() << arg.getArgNumber() << "\n";
+      arg.dump();
+    }
+  }*/
+  llvm::DenseMap<fir::cg::XDeclareOp, unsigned> argMap;
+  DITypeAttr retTy;
+  int start = 0;
+  funcOp.walk([&](fir::cg::XDeclareOp declOp) {
+    if (&funcOp.front() == declOp->getBlock()) {
+      auto v = declOp.getMemref();
+      if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(v)) {
+        if (declOp.getDummyScope()) {
+          argMap[declOp] = arg.getArgNumber();
+        } else if (arg.getArgNumber() == 0) {
+          start = 1;
+          retTy = typeGen.convertType(arg.getType(), fileAttr, cuAttr, declOp);
+        }
+
+      } else if (auto arg = llvm::dyn_cast<fir::UnboxCharOp>(v)) {
+      }
+    }
+
+  });
 
   mlir::MLIRContext *context = &getContext();
   mlir::OpBuilder builder(context);
