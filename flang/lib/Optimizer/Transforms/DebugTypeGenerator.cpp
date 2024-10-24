@@ -511,6 +511,9 @@ DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
                                 /*hasDescriptor=*/false);
   } else if (auto recTy = mlir::dyn_cast_or_null<fir::RecordType>(Ty)) {
     return convertRecordType(recTy, fileAttr, scope, declOp);
+  } else if (mlir::isa<mlir::IndexType>(Ty)) {
+    return genBasicType(context, mlir::StringAttr::get(context, "integer"), 64,
+                        llvm::dwarf::DW_ATE_signed);
   } else if (auto boxTy = mlir::dyn_cast_or_null<fir::BoxType>(Ty)) {
     auto elTy = boxTy.getElementType();
     if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(elTy))
