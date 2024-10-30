@@ -47,7 +47,7 @@ namespace fir {
 namespace {
 
 class AddDebugInfoPass : public fir::impl::AddDebugInfoBase<AddDebugInfoPass> {
-  void handleDeclareOp(fir::cg::XDeclareOp declOp,
+  void handleDeclareOp(fir::DeclareOp declOp,
                        mlir::LLVM::DIFileAttr fileAttr,
                        mlir::LLVM::DIScopeAttr scopeAttr,
                        fir::DebugTypeGenerator &typeGen,
@@ -68,7 +68,7 @@ private:
                       mlir::LLVM::DIScopeAttr scope,
                       fir::DebugTypeGenerator &typeGen,
                       mlir::SymbolTable *symbolTable,
-                      fir::cg::XDeclareOp declOp);
+                      fir::DeclareOp declOp);
   void handleFuncOp(mlir::func::FuncOp funcOp, mlir::LLVM::DIFileAttr fileAttr,
                     mlir::LLVM::DICompileUnitAttr cuAttr,
                     fir::DebugTypeGenerator &typeGen,
@@ -90,7 +90,7 @@ bool debugInfoIsAlreadySet(mlir::Location loc) {
 
 } // namespace
 
-void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
+void AddDebugInfoPass::handleDeclareOp(fir::DeclareOp declOp,
                                        mlir::LLVM::DIFileAttr fileAttr,
                                        mlir::LLVM::DIScopeAttr scopeAttr,
                                        fir::DebugTypeGenerator &typeGen,
@@ -122,8 +122,8 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   // a dummy_scope operand).
   unsigned argNo = 0;
   if (fir::isDummyArgument(declOp.getMemref())) {
-    auto arg = llvm::cast<mlir::BlockArgument>(declOp.getMemref());
-    argNo = arg.getArgNumber() + 1;
+    if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(declOp.getMemref()))
+      argNo = arg.getArgNumber() + 1;
   }
 
   auto tyAttr = typeGen.convertType(fir::unwrapRefType(declOp.getType()),
@@ -201,7 +201,7 @@ void AddDebugInfoPass::handleGlobalOp(fir::GlobalOp globalOp,
                                       mlir::LLVM::DIScopeAttr scope,
                                       fir::DebugTypeGenerator &typeGen,
                                       mlir::SymbolTable *symbolTable,
-                                      fir::cg::XDeclareOp declOp) {
+                                      fir::DeclareOp declOp) {
   if (debugInfoIsAlreadySet(globalOp.getLoc()))
     return;
   mlir::MLIRContext *context = &getContext();
@@ -379,7 +379,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   // clash of names.
   // There is no information about module variable renaming
   llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr> importedModules;
-  funcOp.walk([&](fir::cg::XDeclareOp declOp) {
+  funcOp.walk([&](fir::DeclareOp declOp) {
     if (&funcOp.front() == declOp->getBlock())
       if (auto global =
               symbolTable->lookup<fir::GlobalOp>(declOp.getUniqName())) {
@@ -402,7 +402,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
       subTypeAttr, entities, /*annotations=*/{});
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
-  funcOp.walk([&](fir::cg::XDeclareOp declOp) {
+  funcOp.walk([&](fir::DeclareOp declOp) {
     // FIXME: We currently dont handle variables that are not in the entry
     // blocks of the fuctions. These may be variable or arguments used in the
     // OpenMP target regions.

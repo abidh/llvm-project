@@ -44,6 +44,46 @@ std::uint64_t getComponentOffset<0>(const mlir::DataLayout &dl,
   return 0;
 }
 
+static size_t getShiftSize(fir::DeclareOp declOp) {
+  if (auto shapeVal = declOp.getShape()) {
+    if (auto shiftOp = mlir::dyn_cast<fir::ShapeShiftOp>(shapeVal.getDefiningOp()))
+      return shiftOp.getPairs().size() / 2;
+    else if (auto shiftOp = mlir::dyn_cast<fir::ShiftOp>(shapeVal.getDefiningOp()))
+      return shiftOp.getOrigins().size();
+  }
+  return 0;
+}
+
+static mlir::Value getShiftAtIndex(fir::DeclareOp declOp, unsigned index) {
+  if (auto shapeVal = declOp.getShape()) {
+    if (auto shiftOp = mlir::dyn_cast<fir::ShapeShiftOp>(shapeVal.getDefiningOp()))
+      return shiftOp.getPairs()[2 * index];
+    else if (auto shiftOp = mlir::dyn_cast<fir::ShiftOp>(shapeVal.getDefiningOp()))
+      return shiftOp.getOrigins()[index];
+  }
+  return nullptr;
+}
+
+static size_t getShapeSize(fir::DeclareOp declOp) {
+  if (auto shapeVal = declOp.getShape()) {
+    if (auto shapeOp = mlir::dyn_cast<fir::ShapeOp>(shapeVal.getDefiningOp()))
+      return shapeOp.getExtents().size();
+    else if (auto shiftOp = mlir::dyn_cast<fir::ShapeShiftOp>(shapeVal.getDefiningOp()))
+      return shiftOp.getPairs().size() / 2;
+  }
+  return 0;
+}
+
+static mlir::Value getShapeAtIndex(fir::DeclareOp declOp, unsigned index) {
+  if (auto shapeVal = declOp.getShape()) {
+    if (auto shapeOp = mlir::dyn_cast<fir::ShapeOp>(shapeVal.getDefiningOp()))
+      return shapeOp.getExtents()[index];
+    else if (auto shiftOp = mlir::dyn_cast<fir::ShapeShiftOp>(shapeVal.getDefiningOp()))
+      return shiftOp.getPairs()[(2 * index) + 1];
+  }
+  return nullptr;
+}
+
 DebugTypeGenerator::DebugTypeGenerator(mlir::ModuleOp m,
                                        mlir::SymbolTable *symbolTable_,
                                        const mlir::DataLayout &dl)
@@ -84,13 +124,7 @@ static mlir::LLVM::DITypeAttr genPlaceholderType(mlir::MLIRContext *context) {
 mlir::LLVM::DILocalVariableAttr DebugTypeGenerator::generateArtificialVariable(
     mlir::MLIRContext *context, mlir::Value val,
     mlir::LLVM::DIFileAttr fileAttr, mlir::LLVM::DIScopeAttr scope,
-    fir::cg::XDeclareOp declOp) {
-  // There can be multiple artificial variable for a single declOp. To help
-  // distinguish them, we pad the name with a counter. The counter is the
-  // position of 'val' in the operands of declOp.
-  auto varID = std::distance(
-      declOp.getOperands().begin(),
-      std::find(declOp.getOperands().begin(), declOp.getOperands().end(), val));
+    fir::DeclareOp declOp, unsigned varID) {
   mlir::OpBuilder builder(context);
   auto name = mlir::StringAttr::get(context, "." + declOp.getUniqName().str() +
                                                  std::to_string(varID));
@@ -110,7 +144,7 @@ mlir::LLVM::DILocalVariableAttr DebugTypeGenerator::generateArtificialVariable(
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
     fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp,
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp,
     bool genAllocated, bool genAssociated) {
 
   mlir::MLIRContext *context = module.getContext();
@@ -151,13 +185,13 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertBoxedSequenceType(
     // the descriptor and generate the dwarf expression to extract it.
     mlir::Attribute lowerAttr = nullptr;
     // If declaration has a lower bound, use it.
-    if (declOp && declOp.getShift().size() > index) {
+    if (declOp && getShiftSize(declOp) > index) {
       if (std::optional<std::int64_t> optint =
-              getIntIfConstant(declOp.getShift()[index]))
+              getIntIfConstant(getShiftAtIndex(declOp, index)))
         lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, *optint));
       else
         lowerAttr = generateArtificialVariable(
-            context, declOp.getShift()[index], fileAttr, scope, declOp);
+            context, getShiftAtIndex(declOp, index), fileAttr, scope, declOp, index);
     }
     // FIXME: If `indexSize` happens to be bigger than address size on the
     // system then we may have to change 'DW_OP_deref' here.
@@ -286,7 +320,7 @@ DebugTypeGenerator::getFieldSizeAndAlign(mlir::Type fieldTy) {
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertRecordType(
     fir::RecordType Ty, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp) {
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp) {
   // Check if this type has already been converted.
   auto iter = typeCache.find(Ty);
   if (iter != typeCache.end())
@@ -411,7 +445,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertTupleType(
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
     fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp) {
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp) {
   mlir::MLIRContext *context = module.getContext();
 
   llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
@@ -428,14 +462,15 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
     // create a variable that represents its location and use that as lower
     // bound. As an optimization, we don't create a lower bound when shift is a
     // constant 1 as that is the default.
-    if (declOp && declOp.getShift().size() > index) {
+    if (declOp && getShiftSize(declOp) > index) {
       if (std::optional<std::int64_t> optint =
-              getIntIfConstant(declOp.getShift()[index])) {
+              getIntIfConstant(getShiftAtIndex(declOp, index))) {
         if (*optint != 1)
           lowerAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, *optint));
-      } else
+      } else {
         lowerAttr = generateArtificialVariable(
-            context, declOp.getShift()[index], fileAttr, scope, declOp);
+            context, getShiftAtIndex(declOp, index), fileAttr, scope, declOp, (2 * index));
+      }
     }
 
     if (dim == seqTy.getUnknownExtent()) {
@@ -444,12 +479,13 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
       // to use as countAttr. Note that fir has a constant size of -1 for
       // assumed size array. So !optint check makes sure we don't generate
       // variable in that case.
-      if (declOp && declOp.getShape().size() > index) {
+      if (declOp && getShapeSize(declOp) > index) {
         std::optional<std::int64_t> optint =
-            getIntIfConstant(declOp.getShape()[index]);
-        if (!optint)
+            getIntIfConstant(getShapeAtIndex(declOp, index));
+        if (!optint) {
           countAttr = generateArtificialVariable(
-              context, declOp.getShape()[index], fileAttr, scope, declOp);
+              context, getShapeAtIndex(declOp, index), fileAttr, scope, declOp, (2*index) + 1);
+        }
       }
     } else
       countAttr = mlir::IntegerAttr::get(intTy, llvm::APInt(64, dim));
@@ -474,7 +510,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertSequenceType(
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertVectorType(
     fir::VectorType vecTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp) {
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp) {
   mlir::MLIRContext *context = module.getContext();
 
   llvm::SmallVector<mlir::LLVM::DINodeAttr> elements;
@@ -507,7 +543,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertVectorType(
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
     fir::CharacterType charTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp,
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp,
     bool hasDescriptor) {
   mlir::MLIRContext *context = module.getContext();
 
@@ -547,7 +583,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
     // 'stringLength' in DIStringTypeAttr.
     if (declOp && !declOp.getTypeparams().empty()) {
       mlir::LLVM::DILocalVariableAttr lvAttr = generateArtificialVariable(
-          context, declOp.getTypeparams()[0], fileAttr, scope, declOp);
+          context, declOp.getTypeparams()[0], fileAttr, scope, declOp, 0);
       varAttr = mlir::cast<mlir::LLVM::DIVariableAttr>(lvAttr);
     }
   }
@@ -564,7 +600,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertCharacterType(
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertPointerLikeType(
     mlir::Type elTy, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp,
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp,
     bool genAllocated, bool genAssociated) {
   mlir::MLIRContext *context = module.getContext();
 
@@ -590,7 +626,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertPointerLikeType(
 mlir::LLVM::DITypeAttr
 DebugTypeGenerator::convertType(mlir::Type Ty, mlir::LLVM::DIFileAttr fileAttr,
                                 mlir::LLVM::DIScopeAttr scope,
-                                fir::cg::XDeclareOp declOp) {
+                                fir::DeclareOp declOp) {
   mlir::MLIRContext *context = module.getContext();
   if (Ty.isInteger()) {
     return genBasicType(context, mlir::StringAttr::get(context, "integer"),

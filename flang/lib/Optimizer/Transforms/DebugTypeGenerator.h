@@ -32,7 +32,7 @@ public:
   mlir::LLVM::DITypeAttr convertType(mlir::Type Ty,
                                      mlir::LLVM::DIFileAttr fileAttr,
                                      mlir::LLVM::DIScopeAttr scope,
-                                     fir::cg::XDeclareOp declOp);
+                                     fir::DeclareOp declOp);
 
 private:
   mlir::LLVM::DITypeAttr convertRecordType(fir::RecordType Ty,
@@ -43,14 +43,15 @@ private:
                                           mlir::LLVM::DIFileAttr fileAttr,
                                           mlir::LLVM::DIScopeAttr scope,
                                           fir::cg::XDeclareOp declOp);
+                                           fir::DeclareOp declOp);
   mlir::LLVM::DITypeAttr convertSequenceType(fir::SequenceType seqTy,
                                              mlir::LLVM::DIFileAttr fileAttr,
                                              mlir::LLVM::DIScopeAttr scope,
-                                             fir::cg::XDeclareOp declOp);
+                                             fir::DeclareOp declOp);
   mlir::LLVM::DITypeAttr convertVectorType(fir::VectorType vecTy,
                                            mlir::LLVM::DIFileAttr fileAttr,
                                            mlir::LLVM::DIScopeAttr scope,
-                                           fir::cg::XDeclareOp declOp);
+                                           fir::DeclareOp declOp);
 
   /// The 'genAllocated' is true when we want to generate 'allocated' field
   /// in the DICompositeType. It is needed for the allocatable arrays.
@@ -58,25 +59,25 @@ private:
   /// 'associated' field.
   mlir::LLVM::DITypeAttr convertBoxedSequenceType(
       fir::SequenceType seqTy, mlir::LLVM::DIFileAttr fileAttr,
-      mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp,
+      mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp,
       bool genAllocated, bool genAssociated);
   mlir::LLVM::DITypeAttr convertCharacterType(fir::CharacterType charTy,
                                               mlir::LLVM::DIFileAttr fileAttr,
                                               mlir::LLVM::DIScopeAttr scope,
-                                              fir::cg::XDeclareOp declOp,
+                                              fir::DeclareOp declOp,
                                               bool hasDescriptor);
 
   mlir::LLVM::DITypeAttr convertPointerLikeType(mlir::Type elTy,
                                                 mlir::LLVM::DIFileAttr fileAttr,
                                                 mlir::LLVM::DIScopeAttr scope,
-                                                fir::cg::XDeclareOp declOp,
+                                                fir::DeclareOp declOp,
                                                 bool genAllocated,
                                                 bool genAssociated);
   mlir::LLVM::DILocalVariableAttr
   generateArtificialVariable(mlir::MLIRContext *context, mlir::Value Val,
                              mlir::LLVM::DIFileAttr fileAttr,
                              mlir::LLVM::DIScopeAttr scope,
-                             fir::cg::XDeclareOp declOp);
+                             fir::DeclareOp declOp, unsigned varID);
   std::pair<std::uint64_t, unsigned short>
   getFieldSizeAndAlign(mlir::Type fieldTy);
 

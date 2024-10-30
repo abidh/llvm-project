@@ -261,10 +261,10 @@ void createDefaultFIRCodeGenPassPipeline(mlir::PassManager &pm,
                                          MLIRToLLVMPassPipelineConfig config,
                                          llvm::StringRef inputFilename) {
   fir::addBoxedProcedurePass(pm);
+  fir::createDebugPasses(pm, config.DebugInfo, config.OptLevel, inputFilename);
   addNestedPassToAllTopLevelOperations(pm, fir::createAbstractResultOpt);
   fir::addCodeGenRewritePass(
       pm, (config.DebugInfo != llvm::codegenoptions::NoDebugInfo));
-  fir::createDebugPasses(pm, config.DebugInfo, config.OptLevel, inputFilename);
   fir::addTargetRewritePass(pm);
   fir::addCompilerGeneratedNamesConversionPass(pm);
   fir::addExternalNameConversionPass(pm, config.Underscoring);
