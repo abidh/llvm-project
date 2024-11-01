@@ -38,12 +38,11 @@ private:
   mlir::LLVM::DITypeAttr convertRecordType(fir::RecordType Ty,
                                            mlir::LLVM::DIFileAttr fileAttr,
                                            mlir::LLVM::DIScopeAttr scope,
-                                           fir::cg::XDeclareOp declOp);
+                                           fir::DeclareOp declOp);
   mlir::LLVM::DITypeAttr convertTupleType(mlir::TupleType Ty,
                                           mlir::LLVM::DIFileAttr fileAttr,
                                           mlir::LLVM::DIScopeAttr scope,
-                                          fir::cg::XDeclareOp declOp);
-                                           fir::DeclareOp declOp);
+                                          fir::DeclareOp declOp);
   mlir::LLVM::DITypeAttr convertSequenceType(fir::SequenceType seqTy,
                                              mlir::LLVM::DIFileAttr fileAttr,
                                              mlir::LLVM::DIScopeAttr scope,

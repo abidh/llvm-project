@@ -409,7 +409,7 @@ mlir::LLVM::DITypeAttr DebugTypeGenerator::convertRecordType(
 
 mlir::LLVM::DITypeAttr DebugTypeGenerator::convertTupleType(
     mlir::TupleType Ty, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, fir::cg::XDeclareOp declOp) {
+    mlir::LLVM::DIScopeAttr scope, fir::DeclareOp declOp) {
   // Check if this type has already been converted.
   auto iter = typeCache.find(Ty);
   if (iter != typeCache.end())
