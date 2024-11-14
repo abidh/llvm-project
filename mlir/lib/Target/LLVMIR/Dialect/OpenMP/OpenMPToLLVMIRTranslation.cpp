@@ -467,7 +467,6 @@ static llvm::Expected<llvm::BasicBlock *> convertOmpOpRegions(
     if (failed(
             moduleTranslation.convertBlock(*bb, bb->isEntryBlock(), builder)))
       return llvm::make_error<PreviouslyReportedError>();
-
     // Special handling for `omp.yield` and `omp.terminator` (we may have more
     // than one): they return the control to the parent OpenMP dialect operation
     // so replace them with the branch to the continuation block. We handle this
@@ -3856,11 +3855,13 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       llvmOutlinedFn->addFnAttr(attr);
 
     builder.restoreIP(codeGenIP);
+    unsigned index = 0;
     for (auto [arg, mapOp] : llvm::zip_equal(mapBlockArgs, mapVars)) {
       auto mapInfoOp = cast<omp::MapInfoOp>(mapOp.getDefiningOp());
+      auto *pArg = llvmOutlinedFn->getArg(index);
       llvm::Value *mapOpValue =
           moduleTranslation.lookupValue(mapInfoOp.getVarPtr());
-      moduleTranslation.mapValue(arg, mapOpValue);
+      moduleTranslation.mapValue(arg, pArg);
     }
 
     // Do privatization after moduleTranslation has already recorded

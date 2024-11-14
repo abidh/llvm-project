@@ -45,6 +45,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/ReplaceConstant.h"
 #include "llvm/IR/Value.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -6804,8 +6805,11 @@ static Expected<Function *> createOutlinedFunction(
       if (DL) {
         // TODO: We are using nullopt for arguments at the moment. This will
         // need to be updated when debug data is being generated for variables.
+    DIBasicType *i32 = DB.createBasicType("integer", 32, llvm::dwarf::DW_ATE_signed);
+    DIBasicType *vTy = DB.createUnspecifiedType("void");
+
         DISubroutineType *Ty =
-            DB.createSubroutineType(DB.getOrCreateTypeArray({}));
+            DB.createSubroutineType(DB.getOrCreateTypeArray({vTy, i32, i32}));
         DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagDefinition |
                                           DISubprogram::SPFlagOptimized |
                                           DISubprogram::SPFlagLocalToUnit;
@@ -6814,6 +6818,7 @@ static Expected<Function *> createOutlinedFunction(
             CU, FuncName, FuncName, SP->getFile(), DL.getLine(), Ty,
             DL.getLine(), DINode::DIFlags::FlagArtificial, SPFlags);
 
+        OutlinedSP->dump();
         // Attach subprogram to the function.
         Func->setSubprogram(OutlinedSP);
         // Update the CurrentDebugLocation in the builder so that right scope
@@ -6849,6 +6854,24 @@ static Expected<Function *> createOutlinedFunction(
   Builder.restoreIP(*AfterIP);
   if (OMPBuilder.Config.isTargetDevice())
     OMPBuilder.createTargetDeinit(Builder);
+
+  for (BasicBlock &BB : *Func) {
+    for (Instruction &I : BB) {
+      if (auto *DB = dyn_cast<llvm::DbgDeclareInst>(&I)) {
+        auto old = DB->getVariable();
+        auto LV = llvm::DILocalVariable::get(
+          Builder.getContext(), Func->getSubprogram(), old->getName(),
+          old->getFile(), old->getLine(), old->getType(), 
+          old->getArg(), old->getFlags(), old->getDWARFMemorySpace(),
+          old->getAlignInBits(), old->getAnnotations());
+        DB->setVariable(LV);
+
+        /*auto LV = DB->getVariable();
+        if (dl && dl->getScope())
+          LV->setScope(dl->getScope());*/
+      }
+    }
+  }
 
   // Insert return instruction.
   Builder.CreateRetVoid();
@@ -6937,6 +6960,7 @@ static Expected<Function *> createOutlinedFunction(
   for (auto Deferred : DeferredReplacement)
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred), Func);
 
+OMPBuilder.M.dump();
   return Func;
 }
 

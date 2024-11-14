@@ -406,7 +406,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     // FIXME: We currently dont handle variables that are not in the entry
     // blocks of the fuctions. These may be variable or arguments used in the
     // OpenMP target regions.
-    if (&funcOp.front() == declOp->getBlock())
+    //if (&funcOp.front() == declOp->getBlock())
       handleDeclareOp(declOp, fileAttr, spAttr, typeGen, symbolTable);
   });
 }
