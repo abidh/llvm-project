@@ -3855,13 +3855,12 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       llvmOutlinedFn->addFnAttr(attr);
 
     builder.restoreIP(codeGenIP);
-    unsigned index = 0;
     for (auto [arg, mapOp] : llvm::zip_equal(mapBlockArgs, mapVars)) {
       auto mapInfoOp = cast<omp::MapInfoOp>(mapOp.getDefiningOp());
       auto *pArg = llvmOutlinedFn->getArg(index);
       llvm::Value *mapOpValue =
           moduleTranslation.lookupValue(mapInfoOp.getVarPtr());
-      moduleTranslation.mapValue(arg, pArg);
+      moduleTranslation.mapValue(arg, mapOpValue);
     }
 
     // Do privatization after moduleTranslation has already recorded

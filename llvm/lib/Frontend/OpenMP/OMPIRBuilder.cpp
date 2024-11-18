@@ -34,6 +34,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -6806,19 +6807,22 @@ static Expected<Function *> createOutlinedFunction(
         // TODO: We are using nullopt for arguments at the moment. This will
         // need to be updated when debug data is being generated for variables.
     DIBasicType *i32 = DB.createBasicType("integer", 32, llvm::dwarf::DW_ATE_signed);
+    DIBasicType *i64 = DB.createBasicType("integer", 64, llvm::dwarf::DW_ATE_signed);
     DIBasicType *vTy = DB.createUnspecifiedType("void");
 
-        DISubroutineType *Ty =
-            DB.createSubroutineType(DB.getOrCreateTypeArray({vTy, i32, i32}));
+        DISubroutineType *Ty;
+        if (OMPBuilder.Config.isTargetDevice())
+          Ty = DB.createSubroutineType(DB.getOrCreateTypeArray({nullptr, i64, i32, i32}));
+        else
+          Ty = DB.createSubroutineType(DB.getOrCreateTypeArray({nullptr, i32, i32}));
         DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagDefinition |
                                           DISubprogram::SPFlagOptimized |
                                           DISubprogram::SPFlagLocalToUnit;
 
         DISubprogram *OutlinedSP = DB.createFunction(
-            CU, FuncName, FuncName, SP->getFile(), DL.getLine(), Ty,
+            SP->getFile(), FuncName, FuncName, SP->getFile(), DL.getLine(), Ty,
             DL.getLine(), DINode::DIFlags::FlagArtificial, SPFlags);
 
-        OutlinedSP->dump();
         // Attach subprogram to the function.
         Func->setSubprogram(OutlinedSP);
         // Update the CurrentDebugLocation in the builder so that right scope
@@ -6854,24 +6858,7 @@ static Expected<Function *> createOutlinedFunction(
   Builder.restoreIP(*AfterIP);
   if (OMPBuilder.Config.isTargetDevice())
     OMPBuilder.createTargetDeinit(Builder);
-
-  for (BasicBlock &BB : *Func) {
-    for (Instruction &I : BB) {
-      if (auto *DB = dyn_cast<llvm::DbgDeclareInst>(&I)) {
-        auto old = DB->getVariable();
-        auto LV = llvm::DILocalVariable::get(
-          Builder.getContext(), Func->getSubprogram(), old->getName(),
-          old->getFile(), old->getLine(), old->getType(), 
-          old->getArg(), old->getFlags(), old->getDWARFMemorySpace(),
-          old->getAlignInBits(), old->getAnnotations());
-        DB->setVariable(LV);
-
-        /*auto LV = DB->getVariable();
-        if (dl && dl->getScope())
-          LV->setScope(dl->getScope());*/
-      }
-    }
-  }
+  unsigned int index = (OMPBuilder.Config.isTargetDevice()) ? 2 : 1;
 
   // Insert return instruction.
   Builder.CreateRetVoid();
@@ -6888,7 +6875,7 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
-  auto ReplaceValue = [](Value *Input, Value *InputCopy, Function *Func) {
+  auto ReplaceValue = [&](Value *Input, Value *InputCopy, Function *Func) {
     // Things like GEP's can come in the form of Constants. Constants and
     // ConstantExpr's do not have access to the knowledge of what they're
     // contained in, so we must dig a little to find an instruction so we
@@ -6909,6 +6896,24 @@ static Expected<Function *> createOutlinedFunction(
     if (auto *Const = dyn_cast<Constant>(Input))
       convertUsersOfConstantsToInstructions(Const, Func, false);
 
+    TinyPtrVector<DbgDeclareInst *> DbgDeclares = llvm::findDbgDeclares(Input);
+    for (auto DDI: DbgDeclares) {
+      if (DDI->getFunction() == Func) {
+        auto old = DDI->getVariable();
+        auto SP = Func->getSubprogram();
+        auto LV = llvm::DILocalVariable::get(
+          Builder.getContext(), Func->getSubprogram(), old->getName(),
+          old->getFile(), old->getLine(), old->getType(),
+          index++, old->getFlags(), old->getDWARFMemorySpace(),
+          old->getAlignInBits(), old->getAnnotations());
+        DDI->setVariable(LV);
+        DDI->replaceVariableLocationOp(Input, InputCopy);
+        auto RetainedNodes = SP->getRetainedNodes();
+        llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(), RetainedNodes.end());
+        MDs.push_back((llvm::Metadata*)LV);
+        SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
+      }
+    }
     // Collect all the instructions
     for (User *User : make_early_inc_range(Input->users()))
       if (auto *Instr = dyn_cast<Instruction>(User))
@@ -6960,7 +6965,6 @@ static Expected<Function *> createOutlinedFunction(
   for (auto Deferred : DeferredReplacement)
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred), Func);
 
-OMPBuilder.M.dump();
   return Func;
 }
 
