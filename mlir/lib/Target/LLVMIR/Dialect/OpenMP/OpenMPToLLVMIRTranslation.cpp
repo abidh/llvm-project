@@ -3857,7 +3857,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     builder.restoreIP(codeGenIP);
     for (auto [arg, mapOp] : llvm::zip_equal(mapBlockArgs, mapVars)) {
       auto mapInfoOp = cast<omp::MapInfoOp>(mapOp.getDefiningOp());
-      auto *pArg = llvmOutlinedFn->getArg(index);
       llvm::Value *mapOpValue =
           moduleTranslation.lookupValue(mapInfoOp.getVarPtr());
       moduleTranslation.mapValue(arg, mapOpValue);

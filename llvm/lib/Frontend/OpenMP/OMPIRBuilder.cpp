@@ -6806,9 +6806,8 @@ static Expected<Function *> createOutlinedFunction(
       if (DL) {
         // TODO: We are using nullopt for arguments at the moment. This will
         // need to be updated when debug data is being generated for variables.
-    DIBasicType *i32 = DB.createBasicType("integer", 32, llvm::dwarf::DW_ATE_signed);
-    DIBasicType *i64 = DB.createBasicType("integer", 64, llvm::dwarf::DW_ATE_signed);
-    DIBasicType *vTy = DB.createUnspecifiedType("void");
+        DIBasicType *i32 = DB.createBasicType("integer", 32, llvm::dwarf::DW_ATE_signed);
+        DIBasicType *i64 = DB.createBasicType("integer", 64, llvm::dwarf::DW_ATE_signed);
 
         DISubroutineType *Ty;
         if (OMPBuilder.Config.isTargetDevice())
