@@ -6806,14 +6806,8 @@ static Expected<Function *> createOutlinedFunction(
       if (DL) {
         // TODO: We are using nullopt for arguments at the moment. This will
         // need to be updated when debug data is being generated for variables.
-        DIBasicType *i32 = DB.createBasicType("integer", 32, llvm::dwarf::DW_ATE_signed);
-        DIBasicType *i64 = DB.createBasicType("integer", 64, llvm::dwarf::DW_ATE_signed);
-
-        DISubroutineType *Ty;
-        if (OMPBuilder.Config.isTargetDevice())
-          Ty = DB.createSubroutineType(DB.getOrCreateTypeArray({nullptr, i64, i32, i32}));
-        else
-          Ty = DB.createSubroutineType(DB.getOrCreateTypeArray({nullptr, i32, i32}));
+        DISubroutineType *Ty =
+            DB.createSubroutineType(DB.getOrCreateTypeArray({}));
         DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagDefinition |
                                           DISubprogram::SPFlagOptimized |
                                           DISubprogram::SPFlagLocalToUnit;
@@ -6874,7 +6868,8 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
-  auto ReplaceValue = [&](Value *Input, Value *InputCopy, Function *Func) {
+  auto ReplaceValue = [&](Value *Input, Value *InputCopy, Value *DebugVal,
+                          bool isCopy, Function *Func) {
     // Things like GEP's can come in the form of Constants. Constants and
     // ConstantExpr's do not have access to the knowledge of what they're
     // contained in, so we must dig a little to find an instruction so we
@@ -6895,22 +6890,39 @@ static Expected<Function *> createOutlinedFunction(
     if (auto *Const = dyn_cast<Constant>(Input))
       convertUsersOfConstantsToInstructions(Const, Func, false);
 
+    Input->dump();
     TinyPtrVector<DbgDeclareInst *> DbgDeclares = llvm::findDbgDeclares(Input);
     for (auto DDI: DbgDeclares) {
       if (DDI->getFunction() == Func) {
         auto old = DDI->getVariable();
         auto SP = Func->getSubprogram();
+        DICompileUnit *CU = SP->getUnit();
+        DIBuilder DB(*M, true, CU);
+        DIType *varType = old->getType();
+        if (!isCopy)
+          varType = DB.createQualifiedType(dwarf::DW_TAG_reference_type,
+                                           old->getType());
         auto LV = llvm::DILocalVariable::get(
-          Builder.getContext(), Func->getSubprogram(), old->getName(),
-          old->getFile(), old->getLine(), old->getType(),
-          index++, old->getFlags(), old->getDWARFMemorySpace(),
-          old->getAlignInBits(), old->getAnnotations());
+            Builder.getContext(), Func->getSubprogram(), old->getName(),
+            old->getFile(), old->getLine(), varType, index++, old->getFlags(),
+            llvm::dwarf::DW_MSPACE_LLVM_global, old->getAlignInBits(),
+            old->getAnnotations());
+
+        DDI->replaceVariableLocationOp(Input, DebugVal);
         DDI->setVariable(LV);
-        DDI->replaceVariableLocationOp(Input, InputCopy);
-        auto RetainedNodes = SP->getRetainedNodes();
-        llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(), RetainedNodes.end());
-        MDs.push_back((llvm::Metadata*)LV);
-        SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
+
+        if (OMPBuilder.Config.isTargetDevice()) {
+          llvm::DIExprBuilder ExprBuilder(Builder.getContext());
+          ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugVal->getType());
+          ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
+
+          DDI->setExpression(ExprBuilder.intoExpression());
+          auto RetainedNodes = SP->getRetainedNodes();
+          llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(),
+                                                  RetainedNodes.end());
+          MDs.push_back((llvm::Metadata *)LV);
+          SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
+        }
       }
     }
     // Collect all the instructions
@@ -6927,9 +6939,11 @@ static Expected<Function *> createOutlinedFunction(
     Value *Input = std::get<0>(InArg);
     Argument &Arg = std::get<1>(InArg);
     Value *InputCopy = nullptr;
+    Value *debugLoc = nullptr;
+    bool isCopy = false;
 
-    llvm::OpenMPIRBuilder::InsertPointOrErrorTy AfterIP =
-        ArgAccessorFuncCB(Arg, Input, InputCopy, AllocaIP, Builder.saveIP());
+    llvm::OpenMPIRBuilder::InsertPointOrErrorTy AfterIP = ArgAccessorFuncCB(
+        Arg, Input, debugLoc, InputCopy, isCopy, AllocaIP, Builder.saveIP());
     if (!AfterIP)
       return AfterIP.takeError();
     Builder.restoreIP(*AfterIP);
@@ -6957,12 +6971,13 @@ static Expected<Function *> createOutlinedFunction(
       continue;
     }
 
-    ReplaceValue(Input, InputCopy, Func);
+    ReplaceValue(Input, InputCopy, debugLoc, isCopy, Func);
   }
 
   // Replace all of our deferred Input values, currently just Globals.
   for (auto Deferred : DeferredReplacement)
-    ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred), Func);
+    ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred),
+                 std::get<1>(Deferred), false, Func);
 
   return Func;
 }
