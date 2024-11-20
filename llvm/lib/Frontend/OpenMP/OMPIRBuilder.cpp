@@ -6868,6 +6868,40 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
+  auto FixVariable = [&](Value *Input, Value *InputCopy, Value *DebugVal,
+                         bool isCopy, DbgDeclareInst *DDI) {
+    if (DDI->getFunction() == Func) {
+      auto old = DDI->getVariable();
+      auto SP = Func->getSubprogram();
+      DICompileUnit *CU = SP->getUnit();
+      DIBuilder DB(*M, true, CU);
+      DIType *varType = old->getType();
+      if (!isCopy)
+        varType = DB.createQualifiedType(dwarf::DW_TAG_reference_type,
+                                         old->getType());
+      auto LV = llvm::DILocalVariable::get(
+          Builder.getContext(), Func->getSubprogram(), old->getName(),
+          old->getFile(), old->getLine(), varType, index++, old->getFlags(),
+          llvm::dwarf::DW_MSPACE_LLVM_global, old->getAlignInBits(),
+          old->getAnnotations());
+
+      DDI->replaceVariableLocationOp(Input, DebugVal);
+      DDI->setVariable(LV);
+
+      if (OMPBuilder.Config.isTargetDevice()) {
+        llvm::DIExprBuilder ExprBuilder(Builder.getContext());
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugVal->getType());
+        ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
+
+        DDI->setExpression(ExprBuilder.intoExpression());
+        auto RetainedNodes = SP->getRetainedNodes();
+        llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(),
+                                                RetainedNodes.end());
+        MDs.push_back((llvm::Metadata *)LV);
+        SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
+      }
+    }
+  };
   auto ReplaceValue = [&](Value *Input, Value *InputCopy, Value *DebugVal,
                           bool isCopy, Function *Func) {
     // Things like GEP's can come in the form of Constants. Constants and
@@ -6890,39 +6924,22 @@ static Expected<Function *> createOutlinedFunction(
     if (auto *Const = dyn_cast<Constant>(Input))
       convertUsersOfConstantsToInstructions(Const, Func, false);
 
-    Input->dump();
-    TinyPtrVector<DbgDeclareInst *> DbgDeclares = llvm::findDbgDeclares(Input);
-    for (auto DDI: DbgDeclares) {
-      if (DDI->getFunction() == Func) {
-        auto old = DDI->getVariable();
-        auto SP = Func->getSubprogram();
-        DICompileUnit *CU = SP->getUnit();
-        DIBuilder DB(*M, true, CU);
-        DIType *varType = old->getType();
-        if (!isCopy)
-          varType = DB.createQualifiedType(dwarf::DW_TAG_reference_type,
-                                           old->getType());
-        auto LV = llvm::DILocalVariable::get(
-            Builder.getContext(), Func->getSubprogram(), old->getName(),
-            old->getFile(), old->getLine(), varType, index++, old->getFlags(),
-            llvm::dwarf::DW_MSPACE_LLVM_global, old->getAlignInBits(),
-            old->getAnnotations());
-
-        DDI->replaceVariableLocationOp(Input, DebugVal);
-        DDI->setVariable(LV);
-
-        if (OMPBuilder.Config.isTargetDevice()) {
-          llvm::DIExprBuilder ExprBuilder(Builder.getContext());
-          ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugVal->getType());
-          ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
-
-          DDI->setExpression(ExprBuilder.intoExpression());
-          auto RetainedNodes = SP->getRetainedNodes();
-          llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(),
-                                                  RetainedNodes.end());
-          MDs.push_back((llvm::Metadata *)LV);
-          SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
+    if (llvm::isa<llvm::GlobalValue>(Input) ||
+        llvm::isa<llvm::GlobalObject>(Input) ||
+        llvm::isa<llvm::GlobalVariable>(Input)) {
+      for (BasicBlock &BB : *Func) {
+        for (Instruction &I : BB) {
+          if (auto *DDI = dyn_cast<llvm::DbgDeclareInst>(&I)) {
+            if (DDI->getVariableLocationOp(0) == Input)
+              FixVariable(Input, InputCopy, DebugVal, isCopy, DDI);
+          }
         }
+      }
+    } else {
+      TinyPtrVector<DbgDeclareInst *> DbgDeclares =
+          llvm::findDbgDeclares(Input);
+      for (auto DDI : DbgDeclares) {
+        FixVariable(Input, InputCopy, DebugVal, isCopy, DDI);
       }
     }
     // Collect all the instructions
@@ -6932,7 +6949,7 @@ static Expected<Function *> createOutlinedFunction(
           Instr->replaceUsesOfWith(Input, InputCopy);
   };
 
-  SmallVector<std::pair<Value *, Value *>> DeferredReplacement;
+  SmallVector<std::tuple<Value *, Value *, Value *, bool>> DeferredReplacement;
 
   // Rewrite uses of input valus to parameters.
   for (auto InArg : zip(Inputs, ArgRange)) {
@@ -6967,7 +6984,8 @@ static Expected<Function *> createOutlinedFunction(
     if (llvm::isa<llvm::GlobalValue>(std::get<0>(InArg)) ||
         llvm::isa<llvm::GlobalObject>(std::get<0>(InArg)) ||
         llvm::isa<llvm::GlobalVariable>(std::get<0>(InArg))) {
-      DeferredReplacement.push_back(std::make_pair(Input, InputCopy));
+      DeferredReplacement.push_back(
+          std::make_tuple(Input, InputCopy, debugLoc, isCopy));
       continue;
     }
 
@@ -6977,7 +6995,7 @@ static Expected<Function *> createOutlinedFunction(
   // Replace all of our deferred Input values, currently just Globals.
   for (auto Deferred : DeferredReplacement)
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred),
-                 std::get<1>(Deferred), false, Func);
+                 std::get<2>(Deferred), std::get<3>(Deferred), Func);
 
   return Func;
 }
