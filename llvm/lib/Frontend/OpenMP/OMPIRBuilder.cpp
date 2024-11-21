@@ -27,6 +27,7 @@
 #include "llvm/Frontend/Offloading/Utility.h"
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/CallingConv.h"
@@ -6997,6 +6998,27 @@ static Expected<Function *> createOutlinedFunction(
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred),
                  std::get<2>(Deferred), std::get<3>(Deferred), Func);
 
+  for (Instruction &I : instructions(Func)) {
+    if (auto *DDI = dyn_cast<llvm::DbgDeclareInst>(&I)) {
+    //for (DbgRecord &DR : I.getDbgRecordRange()) {
+      //DbgVariableRecord &DVR = cast<DbgVariableRecord>(DR);
+      //DVR.dump();
+      auto old = DDI->getVariable();
+      auto SP = Func->getSubprogram();
+      DICompileUnit *CU = SP->getUnit();
+      DIBuilder DB(*M, true, CU);
+      DIType *varType = old->getType();
+      if (old->getScope() == SP)
+        continue;
+      auto LV = llvm::DILocalVariable::get(
+          Builder.getContext(), SP, old->getName(),
+          old->getFile(), old->getLine(), varType, 0, old->getFlags(),
+          llvm::dwarf::DW_MSPACE_LLVM_global, old->getAlignInBits(),
+          old->getAnnotations());
+
+      DDI->setVariable(LV);
+    }
+  }
   return Func;
 }
 
