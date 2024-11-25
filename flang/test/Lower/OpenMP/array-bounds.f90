@@ -65,13 +65,15 @@ module assumed_array_routines
     end subroutine assumed_shape_array
 
 
+
+
 !HOST-LABEL: func.func @_QMassumed_array_routinesPassumed_size_array(
 !HOST-SAME: %[[ARG0:.*]]: !fir.ref<!fir.array<?xi32>> {fir.bindc_name = "arr_read_write"}) {
 !HOST: %[[ARG0_SHAPE:.*]] = fir.shape %{{.*}} : (index) -> !fir.shape<1>
 !HOST: %[[ARG0_DECL:.*]]:2 = hlfir.declare %[[ARG0]](%[[ARG0_SHAPE]]) dummy_scope %{{[0-9]+}} {fortran_attrs = #fir.var_attrs<intent_inout>, uniq_name = "_QMassumed_array_routinesFassumed_size_arrayEarr_read_write"} : (!fir.ref<!fir.array<?xi32>>, !fir.shape<1>, !fir.dscope) -> (!fir.box<!fir.array<?xi32>>, !fir.ref<!fir.array<?xi32>>)
 !HOST: %[[ALLOCA:.*]] = fir.alloca i32 {bindc_name = "i", uniq_name = "_QMassumed_array_routinesFassumed_size_arrayEi"}
 !HOST: %[[DIMS0:.*]]:3 = fir.box_dims %[[ARG0_DECL]]#0, %c0{{.*}} : (!fir.box<!fir.array<?xi32>>, index) -> (index, index, index)
-!HOST: %[[C4_1:.*]] = arith.subi %c4, %c1{{.*}} : index
+!HOST: %[[C4_1:.*]] = arith.subi %c4{{.*}}, %c1{{.*}} : index
 !HOST: %[[EXT:.*]] = arith.addi %[[C4_1]], %c1{{.*}} : index
 !HOST: %[[BOUNDS:.*]] = omp.map.bounds lower_bound(%c1{{.*}} : index) upper_bound(%c4{{.*}} : index) extent(%[[EXT]] : index) stride(%[[DIMS0]]#2 : index) start_idx(%c1{{.*}} : index) {stride_in_bytes = true}
 !HOST: %[[MAP:.*]] = omp.map.info var_ptr(%[[ARG0_DECL]]#1 : !fir.ref<!fir.array<?xi32>>, i32) map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}

@@ -1213,9 +1213,10 @@ def TargetOp : OpenMP_Op<"target", traits = [
   ], clauses = [
     // TODO: Complete clause list (defaultmap, uses_allocators).
     OpenMP_AllocateClause, OpenMP_DependClause, OpenMP_DeviceClause,
-    OpenMP_HasDeviceAddrClause, OpenMP_IfClause, OpenMP_InReductionClause,
-    OpenMP_IsDevicePtrClause, OpenMP_MapClauseSkip<assemblyFormat = true>,
-    OpenMP_NowaitClause, OpenMP_PrivateClause, OpenMP_ThreadLimitClause
+    OpenMP_HasDeviceAddrClause, OpenMP_HostEvalClause, OpenMP_IfClause,
+    OpenMP_InReductionClause, OpenMP_IsDevicePtrClause,
+    OpenMP_MapClauseSkip<assemblyFormat = true>, OpenMP_NowaitClause,
+    OpenMP_PrivateClause, OpenMP_ThreadLimitClause
   ], singleRegion = true> {
   let summary = "target construct";
   let description = [{
@@ -1225,6 +1226,21 @@ def TargetOp : OpenMP_Op<"target", traits = [
     The optional `if_expr` parameter specifies a boolean result of a conditional
     check. If this value is 1 or is not provided then the target region runs on
     a device, if it is 0 then the target region is executed on the host device.
+
+    The optional `trip_count` indicates the total number of loop iterations,
+    only if this target region represents a single TEAMS+DISTRIBUTE+PARALLEL
+    worksharing loop.
+
+    The optional `num_teams_lower`, `num_teams_upper` and `teams_thread_limit`
+    arguments represent the corresponding arguments of a directly nested
+    `omp.teams`. They can be only set in this operation when representing
+    combined constructs that include TARGET and TEAMS, so that they can be
+    evaluated in the host device.
+
+    The optional `num_threads` argument represents the corresponding argument of
+    a nested `omp.parallel`, which is only allowed if this target region
+    contains a single (possibly multi-level) nest of OpenMP operations including
+    an `omp.parallel`.
   }] # clausesDescription;
 
   let builders = [
@@ -1233,13 +1249,30 @@ def TargetOp : OpenMP_Op<"target", traits = [
 
   let extraClassDeclaration = [{
     unsigned numMapBlockArgs() { return getMapVars().size(); }
+
+    /// Returns the innermost OpenMP dialect operation captured by this target
+    /// construct. For an operation to be detected as captured, it must be
+    /// inside a (possibly multi-level) nest of OpenMP dialect operation's
+    /// regions where none of these levels contain other operations considered
+    /// not-allowed for these purposes (i.e. only terminator operations are
+    /// allowed from the OpenMP dialect, and other dialect's operations are
+    /// allowed as long as they don't have a memory write effect).
+    ///
+    /// If there are omp.loop_nest operations in the sequence of nested
+    /// operations, the top level one will be the one captured.
+    Operation *getInnermostCapturedOmpOp();
+
+    /// Tells whether this target region represents a single worksharing loop
+    /// wrapped by omp.teams omp.distribute and omp.parallel constructs.
+    bool isTargetSPMDLoop();
   }] # clausesExtraClassDeclaration;
 
   let assemblyFormat = clausesAssemblyFormat # [{
-    custom<InReductionMapPrivateRegion>(
-        $region, $in_reduction_vars, type($in_reduction_vars),
-        $in_reduction_byref, $in_reduction_syms, $map_vars, type($map_vars),
-        $private_vars, type($private_vars), $private_syms) attr-dict
+    custom<HostEvalInReductionMapPrivateRegion>(
+        $region, $host_eval_vars, type($host_eval_vars), $in_reduction_vars,
+        type($in_reduction_vars), $in_reduction_byref, $in_reduction_syms,
+        $map_vars, type($map_vars), $private_vars, type($private_vars),
+        $private_syms) attr-dict
   }];
 
   let hasVerifier = 1;

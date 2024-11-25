@@ -762,7 +762,7 @@ def ConvertMathToLLVMPass : Pass<"convert-math-to-llvm"> {
 }
 
 //===----------------------------------------------------------------------===//
-// MathToLibm
+// MathToROCDL
 //===----------------------------------------------------------------------===//
 
 def ConvertMathToROCDL : Pass<"convert-math-to-rocdl", "ModuleOp"> {

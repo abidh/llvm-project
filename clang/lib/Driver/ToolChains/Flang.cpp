@@ -120,7 +120,9 @@ void Flang::addOtherOptions(const ArgList &Args, ArgStringList &CmdArgs) const {
                    options::OPT_fintrinsic_modules_path, options::OPT_pedantic,
                    options::OPT_std_EQ, options::OPT_W_Joined,
                    options::OPT_fconvert_EQ, options::OPT_fpass_plugin_EQ,
-                   options::OPT_funderscoring, options::OPT_fno_underscoring});
+                   options::OPT_funderscoring, options::OPT_fno_underscoring,
+                   options::OPT_foffload_global_filtering,
+                   options::OPT_fno_offload_global_filtering});
 
   llvm::codegenoptions::DebugInfoKind DebugInfoKind;
   if (Args.hasArg(options::OPT_gN_Group)) {
@@ -150,7 +152,8 @@ void Flang::addCodegenOptions(const ArgList &Args,
                             options::OPT_flang_deprecated_no_hlfir,
                             options::OPT_flang_experimental_integer_overflow,
                             options::OPT_fno_ppc_native_vec_elem_order,
-                            options::OPT_fppc_native_vec_elem_order});
+                            options::OPT_fppc_native_vec_elem_order,
+                            options::OPT_do_concurrent_parallel_EQ});
 }
 
 void Flang::addPicOptions(const ArgList &Args, ArgStringList &CmdArgs) const {
