@@ -62,7 +62,7 @@ class MapInfoFinalizationPass
   /// Tracks any intermediate function/subroutine local allocations we
   /// generate for the descriptors of box type dummy arguments, so that
   /// we can retrieve it for subsequent reuses within the functions
-  /// scope
+  /// scope.
   std::map</*descriptor opaque pointer=*/void *,
            /*corresponding local alloca=*/fir::AllocaOp>
       localBoxAllocas;
@@ -370,24 +370,23 @@ class MapInfoFinalizationPass
     if (!mapClauseOwner)
       return;
 
-    auto addOperands = [&](mlir::MutableOperandRange &mutableOpRange,
+    auto addOperands = [&](mlir::MutableOperandRange &mapVarsArr,
                            mlir::Operation *directiveOp,
                            unsigned blockArgInsertIndex = 0) {
-      if (!llvm::is_contained(mutableOpRange.getAsOperandRange(),
-                              op.getResult()))
+      if (!llvm::is_contained(mapVarsArr.getAsOperandRange(), op.getResult()))
         return;
 
       // There doesn't appear to be a simple way to convert MutableOperandRange
       // to a vector currently, so we instead use a for_each to populate our
       // vector.
       llvm::SmallVector<mlir::Value> newMapOps;
-      newMapOps.reserve(mutableOpRange.size());
+      newMapOps.reserve(mapVarsArr.size());
       llvm::for_each(
-          mutableOpRange.getAsOperandRange(),
+          mapVarsArr.getAsOperandRange(),
           [&newMapOps](mlir::Value oper) { newMapOps.push_back(oper); });
 
       for (auto mapMember : op.getMembers()) {
-        if (llvm::is_contained(mutableOpRange.getAsOperandRange(), mapMember))
+        if (llvm::is_contained(mapVarsArr.getAsOperandRange(), mapMember))
           continue;
         newMapOps.push_back(mapMember);
         if (directiveOp) {
@@ -397,7 +396,7 @@ class MapInfoFinalizationPass
         }
       }
 
-      mutableOpRange.assign(newMapOps);
+      mapVarsArr.assign(newMapOps);
     };
 
     auto argIface =
@@ -405,14 +404,13 @@ class MapInfoFinalizationPass
 
     if (auto mapClauseOwner =
             llvm::dyn_cast<mlir::omp::MapClauseOwningOpInterface>(target)) {
-      mlir::MutableOperandRange mapMutableOpRange =
-          mapClauseOwner.getMapVarsMutable();
+      mlir::MutableOperandRange mapVarsArr = mapClauseOwner.getMapVarsMutable();
       unsigned blockArgInsertIndex =
           argIface
               ? argIface.getMapBlockArgsStart() + argIface.numMapBlockArgs()
               : 0;
       addOperands(
-          mapMutableOpRange,
+          mapVarsArr,
           llvm::dyn_cast_or_null<mlir::omp::TargetOp>(argIface.getOperation()),
           blockArgInsertIndex);
     }
@@ -466,10 +464,7 @@ class MapInfoFinalizationPass
   // operation (usually function) containing the MapInfoOp because this pass
   // will mutate siblings of MapInfoOp.
   void runOnOperation() override {
-    mlir::ModuleOp module =
-        mlir::dyn_cast_or_null<mlir::ModuleOp>(getOperation());
-    if (!module)
-      module = getOperation()->getParentOfType<mlir::ModuleOp>();
+    mlir::ModuleOp module = mlir::cast<mlir::ModuleOp>(getOperation());
     fir::KindMapping kindMap = fir::getKindMapping(module);
     fir::FirOpBuilder builder{module, std::move(kindMap)};
 
@@ -481,7 +476,7 @@ class MapInfoFinalizationPass
     // ourselves to the possibility of race conditions while this pass
     // undergoes frequent re-iteration for the near future. So we loop
     // over function in the module and then map.info inside of those.
-    getOperation()->walk([&](mlir::func::FuncOp func) {
+    module->walk([&](mlir::func::FuncOp func) {
       // clear all local allocations we made for any boxes in any prior
       // iterations from previous function scopes.
       localBoxAllocas.clear();
