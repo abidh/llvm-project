@@ -7025,7 +7025,8 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
-  auto FixVariable = [&](Value *Input, Value *InputCopy, Value *DebugVal,
+  DenseMap<Value *, Value *> InputMap;
+  /*auto FixVariable = [&](Value *Input, Value *InputCopy, Value *DebugVal,
                          bool isCopy, DbgDeclareInst *DDI) {
     if (DDI->getFunction() == Func) {
       auto old = DDI->getVariable();
@@ -7058,9 +7059,11 @@ static Expected<Function *> createOutlinedFunction(
         SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
       }
     }
-  };
+  };*/
+
   auto ReplaceValue = [&](Value *Input, Value *InputCopy, Value *DebugVal,
                           bool isCopy, Function *Func) {
+    InputMap[Input] = InputCopy;
     // Things like GEP's can come in the form of Constants. Constants and
     // ConstantExpr's do not have access to the knowledge of what they're
     // contained in, so we must dig a little to find an instruction so we
@@ -7081,7 +7084,7 @@ static Expected<Function *> createOutlinedFunction(
     if (auto *Const = dyn_cast<Constant>(Input))
       convertUsersOfConstantsToInstructions(Const, Func, false);
 
-    if (llvm::isa<llvm::GlobalValue>(Input) ||
+    /*if (llvm::isa<llvm::GlobalValue>(Input) ||
         llvm::isa<llvm::GlobalObject>(Input) ||
         llvm::isa<llvm::GlobalVariable>(Input)) {
       for (BasicBlock &BB : *Func) {
@@ -7098,7 +7101,7 @@ static Expected<Function *> createOutlinedFunction(
       for (auto DDI : DbgDeclares) {
         FixVariable(Input, InputCopy, DebugVal, isCopy, DDI);
       }
-    }
+    }*/
     // Collect all the instructions
     for (User *User : make_early_inc_range(Input->users()))
       if (auto *Instr = dyn_cast<Instruction>(User))
@@ -7156,9 +7159,7 @@ static Expected<Function *> createOutlinedFunction(
 
   for (Instruction &I : instructions(Func)) {
     if (auto *DDI = dyn_cast<llvm::DbgDeclareInst>(&I)) {
-    //for (DbgRecord &DR : I.getDbgRecordRange()) {
-      //DbgVariableRecord &DVR = cast<DbgVariableRecord>(DR);
-      //DVR.dump();
+
       auto old = DDI->getVariable();
       auto SP = Func->getSubprogram();
       DICompileUnit *CU = SP->getUnit();
@@ -7166,15 +7167,21 @@ static Expected<Function *> createOutlinedFunction(
       DIType *varType = old->getType();
       if (old->getScope() == SP)
         continue;
+      for (auto loc: DDI->location_ops()) {
+        auto iter = InputMap.find(loc);
+        if (iter != InputMap.end())
+          DDI->replaceVariableLocationOp(loc, iter->second);
+      }
       auto LV = llvm::DILocalVariable::get(
           Builder.getContext(), SP, old->getName(),
           old->getFile(), old->getLine(), varType, 0, old->getFlags(),
-          llvm::dwarf::DW_MSPACE_LLVM_global, old->getAlignInBits(),
+          old->getDWARFMemorySpace(), old->getAlignInBits(),
           old->getAnnotations());
 
       DDI->setVariable(LV);
     }
   }
+  //CodeExtractor::fixupDebugInfoPostExtraction(*ParentFn, *Func, nullptr);
   return Func;
 }
 
