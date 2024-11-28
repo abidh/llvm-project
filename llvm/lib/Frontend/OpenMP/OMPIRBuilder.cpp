@@ -38,6 +38,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
@@ -6830,6 +6832,8 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
+  DenseMap<Value *, std::tuple<Value *, unsigned>> InputMap;
+
   auto ReplaceValue = [](Value *Input, Value *InputCopy, Function *Func) {
     // Things like GEP's can come in the form of Constants. Constants and
     // ConstantExpr's do not have access to the knowledge of what they're
@@ -6871,6 +6875,7 @@ static Expected<Function *> createOutlinedFunction(
     if (!AfterIP)
       return AfterIP.takeError();
     Builder.restoreIP(*AfterIP);
+    InputMap[Input] = std::make_tuple(InputCopy, Arg.getArgNo());
 
     // In certain cases a Global may be set up for replacement, however, this
     // Global may be used in multiple arguments to the kernel, just segmented
@@ -6902,6 +6907,70 @@ static Expected<Function *> createOutlinedFunction(
   for (auto Deferred : DeferredReplacement)
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred), Func);
 
+  DenseMap<const MDNode *, MDNode *> Cache;
+  SmallDenseMap<DILocalVariable *, DILocalVariable *> RemappedMetadata;
+
+  auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, unsigned arg) {
+    auto NewSP = Func->getSubprogram();
+    DILocalVariable *&NewVar = RemappedMetadata[OldVar];
+    if (!NewVar) {
+      DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
+          *OldVar->getScope(), *NewSP, Builder.getContext(), Cache);
+      NewVar = llvm::DILocalVariable::get(
+          Builder.getContext(), NewScope, OldVar->getName(), OldVar->getFile(),
+          OldVar->getLine(), OldVar->getType(), arg, OldVar->getFlags(),
+          OldVar->getAlignInBits(), OldVar->getAnnotations());
+    }
+    return NewVar;
+  };
+
+  DISubprogram *NewSP = Func->getSubprogram();
+  if (NewSP) {
+    // The location and scope of variable intrinsics and records still point to
+    // the parent function of the target region. Update it to just created
+    // function.
+    for (Instruction &I : instructions(Func)) {
+      if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
+        auto old = DDI->getVariable();
+        unsigned argNo = old->getArg();
+        for (auto loc : DDI->location_ops()) {
+          auto iter = InputMap.find(loc);
+          if (iter != InputMap.end()) {
+            DDI->replaceVariableLocationOp(loc, std::get<0>(iter->second));
+            argNo = std::get<1>(iter->second) + 1;
+          }
+        }
+        DDI->setVariable(GetUpdatedDIVariable(old, argNo));
+      }
+      for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
+        auto old = DVR.getVariable();
+        unsigned argNo = old->getArg();
+        for (auto loc : DVR.location_ops()) {
+          auto iter = InputMap.find(loc);
+          if (iter != InputMap.end()) {
+            DVR.replaceVariableLocationOp(loc, std::get<0>(iter->second));
+            argNo = std::get<1>(iter->second) + 1;
+          }
+        }
+        DVR.setVariable(GetUpdatedDIVariable(DVR.getVariable(), argNo));
+      }
+    }
+    // An extra argument is passed to the device. Create the debug data for it.
+    if (OMPBuilder.Config.isTargetDevice()) {
+      DICompileUnit *CU = NewSP->getUnit();
+      DIBuilder DB(*M, true, CU);
+      DIType *VoidPtrTy =
+          DB.createQualifiedType(dwarf::DW_TAG_pointer_type, nullptr);
+      DILocalVariable *Var = DB.createParameterVariable(
+          NewSP, "dyn_ptr",
+          /*ArgNo*/ 1, NewSP->getFile(),
+          /*LineNo=*/0, VoidPtrTy,
+          /*AlwaysPreserve=*/false, DINode::DIFlags::FlagArtificial);
+      auto loc = DILocation::get(Func->getContext(), 0, 0, NewSP, 0);
+      DB.insertDeclare(&(*Func->arg_begin()), Var, DB.createExpression(), loc,
+                       &(*Func->begin()));
+    }
+  }
   return Func;
 }
 
