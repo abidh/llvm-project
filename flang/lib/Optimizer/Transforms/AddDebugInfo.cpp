@@ -102,14 +102,14 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   if (result.first != fir::NameUniquer::NameKind::VARIABLE)
     return;
   // If this DeclareOp actually represents a global then treat it as such.
-  if (auto global = symbolTable->lookup<fir::GlobalOp>(declOp.getUniqName())) {
-    handleGlobalOp(global, fileAttr, scopeAttr, typeGen, symbolTable, declOp);
-    return;
+  auto defOp = declOp.getMemref().getDefiningOp();
+  if (defOp && llvm::isa<fir::GlobalOp>(defOp)) {
+    if (auto global =
+            symbolTable->lookup<fir::GlobalOp>(declOp.getUniqName())) {
+      handleGlobalOp(global, fileAttr, scopeAttr, typeGen, symbolTable, declOp);
+      return;
+    }
   }
-
-  // Only accept local variables.
-  if (result.second.procs.empty())
-    return;
 
   // FIXME: There may be cases where an argument is processed a bit before
   // DeclareOp is generated. In that case, DeclareOp may point to an
@@ -403,11 +403,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
-    // FIXME: We currently dont handle variables that are not in the entry
-    // blocks of the fuctions. These may be variable or arguments used in the
-    // OpenMP target regions.
-    if (&funcOp.front() == declOp->getBlock())
-      handleDeclareOp(declOp, fileAttr, spAttr, typeGen, symbolTable);
+    handleDeclareOp(declOp, fileAttr, spAttr, typeGen, symbolTable);
   });
 }
 
