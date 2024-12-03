@@ -7025,45 +7025,10 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
-  DenseMap<Value *, Value *> InputMap;
-  /*auto FixVariable = [&](Value *Input, Value *InputCopy, Value *DebugVal,
-                         bool isCopy, DbgDeclareInst *DDI) {
-    if (DDI->getFunction() == Func) {
-      auto old = DDI->getVariable();
-      auto SP = Func->getSubprogram();
-      DICompileUnit *CU = SP->getUnit();
-      DIBuilder DB(*M, true, CU);
-      DIType *varType = old->getType();
-      if (!isCopy)
-        varType = DB.createQualifiedType(dwarf::DW_TAG_reference_type,
-                                         old->getType());
-      auto LV = llvm::DILocalVariable::get(
-          Builder.getContext(), Func->getSubprogram(), old->getName(),
-          old->getFile(), old->getLine(), varType, index++, old->getFlags(),
-          llvm::dwarf::DW_MSPACE_LLVM_global, old->getAlignInBits(),
-          old->getAnnotations());
-
-      DDI->replaceVariableLocationOp(Input, DebugVal);
-      DDI->setVariable(LV);
-
-      if (OMPBuilder.Config.isTargetDevice()) {
-        llvm::DIExprBuilder ExprBuilder(Builder.getContext());
-        ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugVal->getType());
-        ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
-
-        DDI->setExpression(ExprBuilder.intoExpression());
-        auto RetainedNodes = SP->getRetainedNodes();
-        llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(),
-                                                RetainedNodes.end());
-        MDs.push_back((llvm::Metadata *)LV);
-        SP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
-      }
-    }
-  };*/
+  DenseMap<Value *, std::tuple<Value *, unsigned, Value *, bool>> InputMap;
 
   auto ReplaceValue = [&](Value *Input, Value *InputCopy, Value *DebugVal,
                           bool isCopy, Function *Func) {
-    InputMap[Input] = InputCopy;
     // Things like GEP's can come in the form of Constants. Constants and
     // ConstantExpr's do not have access to the knowledge of what they're
     // contained in, so we must dig a little to find an instruction so we
@@ -7084,24 +7049,6 @@ static Expected<Function *> createOutlinedFunction(
     if (auto *Const = dyn_cast<Constant>(Input))
       convertUsersOfConstantsToInstructions(Const, Func, false);
 
-    /*if (llvm::isa<llvm::GlobalValue>(Input) ||
-        llvm::isa<llvm::GlobalObject>(Input) ||
-        llvm::isa<llvm::GlobalVariable>(Input)) {
-      for (BasicBlock &BB : *Func) {
-        for (Instruction &I : BB) {
-          if (auto *DDI = dyn_cast<llvm::DbgDeclareInst>(&I)) {
-            if (DDI->getVariableLocationOp(0) == Input)
-              FixVariable(Input, InputCopy, DebugVal, isCopy, DDI);
-          }
-        }
-      }
-    } else {
-      TinyPtrVector<DbgDeclareInst *> DbgDeclares =
-          llvm::findDbgDeclares(Input);
-      for (auto DDI : DbgDeclares) {
-        FixVariable(Input, InputCopy, DebugVal, isCopy, DDI);
-      }
-    }*/
     // Collect all the instructions
     for (User *User : make_early_inc_range(Input->users()))
       if (auto *Instr = dyn_cast<Instruction>(User))
@@ -7124,6 +7071,8 @@ static Expected<Function *> createOutlinedFunction(
     if (!AfterIP)
       return AfterIP.takeError();
     Builder.restoreIP(*AfterIP);
+    InputMap[Input] =
+        std::make_tuple(InputCopy, Arg.getArgNo(), debugLoc, isCopy);
 
     // In certain cases a Global may be set up for replacement, however, this
     // Global may be used in multiple arguments to the kernel, just segmented
@@ -7157,31 +7106,104 @@ static Expected<Function *> createOutlinedFunction(
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred),
                  std::get<2>(Deferred), std::get<3>(Deferred), Func);
 
-  for (Instruction &I : instructions(Func)) {
-    if (auto *DDI = dyn_cast<llvm::DbgDeclareInst>(&I)) {
+  DenseMap<const MDNode *, MDNode *> Cache;
+  SmallDenseMap<DILocalVariable *, DILocalVariable *> RemappedVariables;
 
-      auto old = DDI->getVariable();
-      auto SP = Func->getSubprogram();
-      DICompileUnit *CU = SP->getUnit();
-      DIBuilder DB(*M, true, CU);
-      DIType *varType = old->getType();
-      if (old->getScope() == SP)
-        continue;
-      for (auto loc: DDI->location_ops()) {
-        auto iter = InputMap.find(loc);
-        if (iter != InputMap.end())
-          DDI->replaceVariableLocationOp(loc, iter->second);
+  auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, unsigned arg,
+                                  bool IsCopy) {
+    auto NewSP = Func->getSubprogram();
+    DICompileUnit *CU = NewSP->getUnit();
+    DIBuilder DB(*M, true, CU);
+    DILocalVariable *&NewVar = RemappedVariables[OldVar];
+    if (!NewVar) {
+      DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
+          *OldVar->getScope(), *NewSP, Builder.getContext(), Cache);
+      DIType *VarType = OldVar->getType();
+      if (!IsCopy)
+        VarType = DB.createQualifiedType(dwarf::DW_TAG_reference_type,
+                                         OldVar->getType());
+      NewVar = llvm::DILocalVariable::get(
+          Builder.getContext(), NewScope, OldVar->getName(), OldVar->getFile(),
+          OldVar->getLine(), VarType, arg, OldVar->getFlags(),
+          OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
+          OldVar->getAnnotations());
+      if (OMPBuilder.Config.isTargetDevice()) {
+        auto RetainedNodes = NewSP->getRetainedNodes();
+        llvm::SmallVector<llvm::Metadata *> MDs(RetainedNodes.begin(),
+                                                RetainedNodes.end());
+        MDs.push_back((llvm::Metadata *)NewVar);
+        NewSP->replaceRetainedNodes(MDNode::get(Builder.getContext(), MDs));
       }
-      auto LV = llvm::DILocalVariable::get(
-          Builder.getContext(), SP, old->getName(),
-          old->getFile(), old->getLine(), varType, 0, old->getFlags(),
-          old->getDWARFMemorySpace(), old->getAlignInBits(),
-          old->getAnnotations());
+    }
+    return NewVar;
+  };
 
-      DDI->setVariable(LV);
+  DISubprogram *NewSP = Func->getSubprogram();
+  if (NewSP) {
+    // The location and scope of variable intrinsics and records still point to
+    // the parent function of the target region. Update them.
+    for (Instruction &I : instructions(Func)) {
+      if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
+        auto Old = DDI->getVariable();
+        unsigned ArgNo = Old->getArg();
+        bool IsCopy = true;
+        for (auto Loc : DDI->location_ops()) {
+          auto Iter = InputMap.find(Loc);
+          if (Iter != InputMap.end()) {
+            Value *InputCopy = std::get<0>(Iter->second);
+            ArgNo = std::get<1>(Iter->second) + 1;
+            Value *DebugLoc = std::get<2>(Iter->second);
+            IsCopy = std::get<3>(Iter->second);
+            DDI->replaceVariableLocationOp(Loc, DebugLoc);
+            if (OMPBuilder.Config.isTargetDevice()) {
+              llvm::DIExprBuilder ExprBuilder(Builder.getContext());
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugLoc->getType());
+              ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
+              DDI->setExpression(ExprBuilder.intoExpression());
+            }
+          }
+        }
+        DDI->setVariable(GetUpdatedDIVariable(Old, ArgNo, IsCopy));
+      }
+      for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
+        auto Old = DVR.getVariable();
+        unsigned ArgNo = Old->getArg();
+        bool IsCopy = true;
+        for (auto Loc : DVR.location_ops()) {
+          auto Iter = InputMap.find(Loc);
+          if (Iter != InputMap.end()) {
+            Value *InputCopy = std::get<0>(Iter->second);
+            ArgNo = std::get<1>(Iter->second) + 1;
+            Value *DebugLoc = std::get<2>(Iter->second);
+            IsCopy = std::get<3>(Iter->second);
+            DVR.replaceVariableLocationOp(Loc, DebugLoc);
+            if (OMPBuilder.Config.isTargetDevice()) {
+              llvm::DIExprBuilder ExprBuilder(Builder.getContext());
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugLoc->getType());
+              ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
+              DVR.setExpression(ExprBuilder.intoExpression());
+            }
+          }
+        }
+        DVR.setVariable(GetUpdatedDIVariable(Old, ArgNo, IsCopy));
+      }
+    }
+    // An extra argument is passed to the device. Create the debug data for it.
+    if (OMPBuilder.Config.isTargetDevice()) {
+      DICompileUnit *CU = NewSP->getUnit();
+      DIBuilder DB(*M, true, CU);
+      DIType *VoidPtrTy =
+          DB.createQualifiedType(dwarf::DW_TAG_pointer_type, nullptr);
+      DILocalVariable *Var = DB.createParameterVariable(
+          NewSP, "dyn_ptr",
+          /*ArgNo*/ 1, NewSP->getFile(),
+          /*LineNo=*/0, VoidPtrTy,
+          /*AlwaysPreserve=*/false, DINode::DIFlags::FlagArtificial);
+      auto Loc = DILocation::get(Func->getContext(), 0, 0, NewSP, 0);
+      DB.insertDeclare(&(*Func->arg_begin()), Var, DB.createExpression(), Loc,
+                       &(*Func->begin()));
     }
   }
-  //CodeExtractor::fixupDebugInfoPostExtraction(*ParentFn, *Func, nullptr);
   return Func;
 }
 
