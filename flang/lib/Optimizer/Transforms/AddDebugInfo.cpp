@@ -103,7 +103,7 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
     return;
   // If this DeclareOp actually represents a global then treat it as such.
   auto defOp = declOp.getMemref().getDefiningOp();
-  if (defOp && llvm::isa<fir::GlobalOp>(defOp)) {
+  if (defOp && llvm::isa<fir::AddrOfOp>(defOp)) {
     if (auto global =
             symbolTable->lookup<fir::GlobalOp>(declOp.getUniqName())) {
       handleGlobalOp(global, fileAttr, scopeAttr, typeGen, symbolTable, declOp);
