@@ -1059,12 +1059,15 @@ LogicalResult ModuleTranslation::convertGlobals() {
     else if (dropInitializer && cst)
       cst = nullptr;
 
+    unsigned AS = op.getAddrSpace();
+    if ("_QMhelperEvar_x" == op.getSymName())
+      AS = 1;
     auto *var = new llvm::GlobalVariable(
         *llvmModule, type, op.getConstant(), linkage, cst, op.getSymName(),
         /*InsertBefore=*/nullptr,
         op.getThreadLocal_() ? llvm::GlobalValue::GeneralDynamicTLSModel
                              : llvm::GlobalValue::NotThreadLocal,
-        op.getAddrSpace(), op.getExternallyInitialized());
+        AS, op.getExternallyInitialized());
 
     if (std::optional<mlir::SymbolRefAttr> comdat = op.getComdat()) {
       auto selectorOp = cast<ComdatSelectorOp>(
@@ -1095,6 +1098,14 @@ LogicalResult ModuleTranslation::convertGlobals() {
         llvm::DIGlobalVariableExpression *diGlobalExpr =
             debugTranslation->translateGlobalVariableExpression(exprAttr);
         llvm::DIGlobalVariable *diGlobalVar = diGlobalExpr->getVariable();
+        //if (OMPBuilder.Config.isTargetDevice()) {
+              llvm::DIExprBuilder ExprBuilder(llvmModule->getContext());
+              auto ptrTy = llvm::PointerType::get(llvmModule->getContext(), 1);
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, ptrTy);
+              ExprBuilder.append<llvm::DIOp::Deref>(type);
+              diGlobalExpr = llvm::DIGlobalVariableExpression::get(
+              llvmModule->getContext(), diGlobalVar, ExprBuilder.intoExpression());
+        //}
         var->addDebugInfo(diGlobalExpr);
 
         // There is no `globals` field in DICompileUnitAttr which can be
