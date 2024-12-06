@@ -365,4 +365,16 @@ unsigned ConvertFIRToLLVMPattern::getProgramAddressSpace(
   return defaultAddressSpace;
 }
 
+unsigned ConvertFIRToLLVMPattern::getGlobalAddressSpace(
+    mlir::ConversionPatternRewriter &rewriter) const {
+  mlir::Operation *parentOp = rewriter.getInsertionBlock()->getParentOp();
+  assert(parentOp != nullptr &&
+         "expected insertion block to have parent operation");
+  if (auto module = parentOp->getParentOfType<mlir::ModuleOp>())
+    if (mlir::Attribute addrSpace =
+            mlir::DataLayout(module).getGlobalMemorySpace())
+      return llvm::cast<mlir::IntegerAttr>(addrSpace).getUInt();
+  return defaultAddressSpace;
+}
+
 } // namespace fir
