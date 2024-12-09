@@ -139,9 +139,15 @@ struct AddrOfOpConversion : public fir::FIROpConversion<fir::AddrOfOp> {
   llvm::LogicalResult
   matchAndRewrite(fir::AddrOfOp addr, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
+    //unsigned globalAS = getGlobalAddressSpace(rewriter);
     auto ty = convertType(addr.getType());
     rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(
         addr, ty, addr.getSymbol().getRootReference().getValue());
+    // TODO: We need to may be insert AddrSpaceCast to take care of the case that
+    // global may be in different address space. Something like what
+    // AllocaOpConversion does.
+    /*auto ascast = rewriter.replaceOpWithNewOp<mlir::LLVM::AddrSpaceCastOp>(
+          ::getLlvmPtrType(addr.getContext(), 0), addr.getSymbol().getRootReference().getValue());*/
     return mlir::success();
   }
 };
@@ -2858,8 +2864,16 @@ struct GlobalOpConversion : public fir::FIROpConversion<fir::GlobalOp> {
     auto isConst = global.getConstant().has_value();
     mlir::SymbolRefAttr comdat;
     llvm::ArrayRef<mlir::NamedAttribute> attrs;
+    unsigned AS = getGlobalAddressSpace(rewriter);
+    /*if (!dbgExprs.empty()) {
+    mlir::Attribute attr = this->lowerTy().getDataLayout().getGlobalMemorySpace();
+    if (attr) {
+      if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(attr))
+        AS = intAttr.getUInt();
+    }
+    }*/
     auto g = rewriter.create<mlir::LLVM::GlobalOp>(
-        loc, tyAttr, isConst, linkage, global.getSymName(), initAttr, 0, 0,
+        loc, tyAttr, isConst, linkage, global.getSymName(), initAttr, 0, AS,
         false, false, comdat, attrs, dbgExprs);
 
     if (global.getAlignment() && *global.getAlignment() > 0)
