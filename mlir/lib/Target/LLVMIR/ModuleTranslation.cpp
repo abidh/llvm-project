@@ -1059,15 +1059,12 @@ LogicalResult ModuleTranslation::convertGlobals() {
     else if (dropInitializer && cst)
       cst = nullptr;
 
-    unsigned AS = op.getAddrSpace();
-    if ("_QMhelperEvar_x" == op.getSymName())
-      AS = 1;
     auto *var = new llvm::GlobalVariable(
         *llvmModule, type, op.getConstant(), linkage, cst, op.getSymName(),
         /*InsertBefore=*/nullptr,
         op.getThreadLocal_() ? llvm::GlobalValue::GeneralDynamicTLSModel
                              : llvm::GlobalValue::NotThreadLocal,
-        AS, op.getExternallyInitialized());
+        op.getAddrSpace(), op.getExternallyInitialized());
 
     if (std::optional<mlir::SymbolRefAttr> comdat = op.getComdat()) {
       auto selectorOp = cast<ComdatSelectorOp>(

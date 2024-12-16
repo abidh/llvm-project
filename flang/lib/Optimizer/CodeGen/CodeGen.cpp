@@ -141,8 +141,18 @@ struct AddrOfOpConversion : public fir::FIROpConversion<fir::AddrOfOp> {
                   mlir::ConversionPatternRewriter &rewriter) const override {
     //unsigned globalAS = getGlobalAddressSpace(rewriter);
     auto ty = convertType(addr.getType());
-    rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(
-        addr, ty, addr.getSymbol().getRootReference().getValue());
+    auto module = addr.getOperation()->getParentOfType<mlir::ModuleOp>();
+    if (auto global = module.template lookupSymbol<mlir::LLVM::GlobalOp>(
+            addr.getSymbol().getRootReference().getValue())) {
+      auto aaOp =
+          rewriter.create<mlir::LLVM::AddressOfOp>(addr.getLoc(), global);
+      auto conTy = ::getLlvmPtrType(addr.getContext());
+      rewriter.replaceOpWithNewOp<mlir::LLVM::AddrSpaceCastOp>(addr, conTy,
+                                                               aaOp);
+    } else
+      rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(
+          addr, ty, addr.getSymbol().getRootReference().getValue());
+
     // TODO: We need to may be insert AddrSpaceCast to take care of the case that
     // global may be in different address space. Something like what
     // AllocaOpConversion does.
@@ -2864,14 +2874,10 @@ struct GlobalOpConversion : public fir::FIROpConversion<fir::GlobalOp> {
     auto isConst = global.getConstant().has_value();
     mlir::SymbolRefAttr comdat;
     llvm::ArrayRef<mlir::NamedAttribute> attrs;
-    unsigned AS = getGlobalAddressSpace(rewriter);
-    /*if (!dbgExprs.empty()) {
-    mlir::Attribute attr = this->lowerTy().getDataLayout().getGlobalMemorySpace();
-    if (attr) {
-      if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(attr))
-        AS = intAttr.getUInt();
-    }
-    }*/
+    unsigned AS = 0;
+    // Untill we fix the assertion that fails on aggregates
+    if (global.getType().isInteger())
+      AS = getGlobalAddressSpace(rewriter);
     auto g = rewriter.create<mlir::LLVM::GlobalOp>(
         loc, tyAttr, isConst, linkage, global.getSymName(), initAttr, 0, AS,
         false, false, comdat, attrs, dbgExprs);
