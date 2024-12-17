@@ -1058,6 +1058,14 @@ public:
     return registeredDummySymbols.contains(sym);
   }
 
+  unsigned
+  getDummySymbolPos(Fortran::semantics::SymbolRef symRef) const override final {
+    auto iter = dummySymbolsIndex.find(symRef);
+    if (iter != dummySymbolsIndex.end())
+      return iter->second;
+    return 0;
+  }
+
   const Fortran::lower::pft::FunctionLikeUnit *
   getCurrentFunctionUnit() const override final {
     return currentFunctionUnit;
@@ -5156,6 +5164,12 @@ private:
     for (const Fortran::lower::CalleeInterface::PassedEntity &arg :
          callee.getPassedArguments())
       mapPassedEntity(arg);
+
+    unsigned Index = 0
+    for (const Fortran::lower::CalleeInterface::PassedEntity &arg :
+         callee.getPassedArguments()) {
+         dummySymbolsIndex[arg.entity->get()] = ++Index;
+    }
     if (lowerToHighLevelFIR() && !callee.getPassedArguments().empty()) {
       mlir::Value scopeOp = builder->create<fir::DummyScopeOp>(toLocation());
       setDummyArgsScope(scopeOp);
@@ -6022,6 +6036,9 @@ private:
   /// of variables for this function.
   llvm::SmallPtrSet<const Fortran::semantics::Symbol *, 16>
       registeredDummySymbols;
+
+  llvm::DenseMap<const Fortran::semantics::Symbol *, unsigned>
+      dummySymbolsIndex;
 
   /// A map of unique names for constant expressions.
   /// The names are used for representing the constant expressions

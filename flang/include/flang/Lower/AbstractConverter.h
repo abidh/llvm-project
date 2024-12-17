@@ -234,6 +234,9 @@ public:
   virtual bool
   isRegisteredDummySymbol(Fortran::semantics::SymbolRef symRef) const = 0;
 
+  virtual unsigned
+  getDummySymbolPos(Fortran::semantics::SymbolRef symRef) const = 0;
+
   /// Returns the FunctionLikeUnit being lowered, if any.
   virtual const Fortran::lower::pft::FunctionLikeUnit *
   getCurrentFunctionUnit() const = 0;
