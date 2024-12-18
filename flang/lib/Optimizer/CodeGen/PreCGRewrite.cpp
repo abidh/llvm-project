@@ -302,7 +302,7 @@ public:
     // FIXME: Add FortranAttrs and CudaAttrs
     auto xDeclOp = rewriter.create<fir::cg::XDeclareOp>(
         loc, declareOp.getType(), declareOp.getMemref(), shapeOpers, shiftOpers,
-        declareOp.getTypeparams(), declareOp.getDummyScope(),
+        declareOp.getTypeparams(), declareOp.getDummyScope(), declareOp.getArgNo(),
         declareOp.getUniqName());
     LLVM_DEBUG(llvm::dbgs()
                << "rewriting " << declareOp << " to " << xDeclOp << '\n');

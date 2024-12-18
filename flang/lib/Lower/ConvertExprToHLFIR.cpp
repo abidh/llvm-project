@@ -1683,7 +1683,7 @@ private:
     mlir::Value storagePtr = builder.createTemporary(loc, recTy);
     auto varOp = hlfir::EntityWithAttributes{builder.create<hlfir::DeclareOp>(
         loc, storagePtr, "ctor.temp", /*shape=*/nullptr,
-        /*typeparams=*/mlir::ValueRange{}, /*dummy_scope=*/nullptr,
+        /*typeparams=*/mlir::ValueRange{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
         fir::FortranVariableFlagsAttr{})};
 
     // Initialize any components that need initialization.

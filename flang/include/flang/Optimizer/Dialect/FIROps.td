@@ -3124,6 +3124,7 @@ def fir_DeclareOp : fir_Op<"declare", [AttrSizedOperandSegments,
     Optional<AnyShapeOrShiftType>:$shape,
     Variadic<AnyIntegerType>:$typeparams,
     Optional<fir_DummyScopeType>:$dummy_scope,
+    IndexAttr:$arg_no,
     Builtin_StringAttr:$uniq_name,
     OptionalAttr<fir_FortranVariableFlagsAttr>:$fortran_attrs,
     OptionalAttr<cuf_DataAttributeAttr>:$data_attr

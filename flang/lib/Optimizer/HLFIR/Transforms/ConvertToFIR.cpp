@@ -304,7 +304,7 @@ public:
       dataAttr = cuf::DataAttributeAttr::get(rewriter.getContext(), *attr);
     auto firDeclareOp = rewriter.create<fir::DeclareOp>(
         loc, memref.getType(), memref, declareOp.getShape(),
-        declareOp.getTypeparams(), declareOp.getDummyScope(),
+        declareOp.getTypeparams(), declareOp.getDummyScope(), declareOp.getArgNo(),
         declareOp.getUniqName(), fortranAttrs, dataAttr);
 
     // Propagate other attributes from hlfir.declare to fir.declare.

@@ -245,6 +245,7 @@ def fircg_XDeclareOp : fircg_Op<"ext_declare", [AttrSizedOperandSegments]> {
     Variadic<AnyIntegerType>:$shift,
     Variadic<AnyIntegerType>:$typeparams,
     Optional<fir_DummyScopeType>:$dummy_scope,
+    IndexAttr:$arg_no,
     Builtin_StringAttr:$uniq_name
   );
   let results = (outs AnyRefOrBox);

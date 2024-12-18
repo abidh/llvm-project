@@ -1747,7 +1747,7 @@ static void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
       // Declare a local pointer variable.
       auto newBase = builder.create<hlfir::DeclareOp>(
           loc, boxAlloc, name, /*shape=*/nullptr, lenParams,
-          /*dummy_scope=*/nullptr, attributes);
+          /*dummy_scope=*/nullptr, /*arg_no=*/0, attributes);
       mlir::Value nullAddr = builder.createNullConstant(
           loc, llvm::cast<fir::BaseBoxType>(ptrBoxType).getEleTy());
 
@@ -1775,10 +1775,13 @@ static void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
       return;
     }
     mlir::Value dummyScope;
-    if (converter.isRegisteredDummySymbol(sym))
+    unsigned arg_no = 0;
+    if (converter.isRegisteredDummySymbol(sym)) {
       dummyScope = converter.dummyArgsScopeValue();
+      arg_no = converter.getDummySymbolPos(sym);
+    }
     auto newBase = builder.create<hlfir::DeclareOp>(
-        loc, base, name, shapeOrShift, lenParams, dummyScope, attributes,
+        loc, base, name, shapeOrShift, lenParams, dummyScope, arg_no, attributes,
         dataAttr);
     symMap.addVariableDefinition(sym, newBase, force);
     return;

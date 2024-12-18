@@ -1060,7 +1060,7 @@ public:
 
   unsigned
   getDummySymbolPos(Fortran::semantics::SymbolRef symRef) const override final {
-    auto iter = dummySymbolsIndex.find(symRef);
+    auto iter = dummySymbolsIndex.find(&*symRef);
     if (iter != dummySymbolsIndex.end())
       return iter->second;
     return 0;
@@ -5165,10 +5165,13 @@ private:
          callee.getPassedArguments())
       mapPassedEntity(arg);
 
-    unsigned Index = 0
+    unsigned Index = 0;
     for (const Fortran::lower::CalleeInterface::PassedEntity &arg :
          callee.getPassedArguments()) {
-         dummySymbolsIndex[arg.entity->get()] = ++Index;
+         if (arg.entity) {
+          auto *sym = &(arg.entity->get()); 
+          dummySymbolsIndex[sym] = ++Index;
+         }
     }
     if (lowerToHighLevelFIR() && !callee.getPassedArguments().empty()) {
       mlir::Value scopeOp = builder->create<fir::DummyScopeOp>(toLocation());

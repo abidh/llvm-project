@@ -182,6 +182,7 @@ void hlfir::DeclareOp::build(mlir::OpBuilder &builder,
                              llvm::StringRef uniq_name, mlir::Value shape,
                              mlir::ValueRange typeparams,
                              mlir::Value dummy_scope,
+                             unsigned arg_no,
                              fir::FortranVariableFlagsAttr fortran_attrs,
                              cuf::DataAttributeAttr data_attr) {
   auto nameAttr = builder.getStringAttr(uniq_name);
@@ -189,8 +190,10 @@ void hlfir::DeclareOp::build(mlir::OpBuilder &builder,
   bool hasExplicitLbs = hasExplicitLowerBounds(shape);
   mlir::Type hlfirVariableType =
       getHLFIRVariableType(inputType, hasExplicitLbs);
+  mlir::Type indexTy = builder.getIndexType();
+  mlir::IntegerAttr argnoAttr = mlir::IntegerAttr::get(indexTy, arg_no);
   build(builder, result, {hlfirVariableType, inputType}, memref, shape,
-        typeparams, dummy_scope, nameAttr, fortran_attrs, data_attr);
+        typeparams, dummy_scope, argnoAttr, nameAttr, fortran_attrs, data_attr);
 }
 
 llvm::LogicalResult hlfir::DeclareOp::verify() {

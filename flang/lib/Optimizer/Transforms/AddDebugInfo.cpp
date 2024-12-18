@@ -122,8 +122,11 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   // a dummy_scope operand).
   unsigned argNo = 0;
   if (declOp.getDummyScope()) {
-    if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(declOp.getMemref()))
-      argNo = arg.getArgNumber() + 1;
+    //if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(declOp.getMemref()))
+    //  argNo = arg.getArgNumber() + 1;
+    auto numOpt = declOp.getArgNo().tryZExtValue();
+    if (numOpt)
+      argNo = *numOpt;
   }
 
   auto tyAttr = typeGen.convertType(fir::unwrapRefType(declOp.getType()),

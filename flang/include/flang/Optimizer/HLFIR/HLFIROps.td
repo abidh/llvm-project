@@ -89,6 +89,7 @@ def hlfir_DeclareOp : hlfir_Op<"declare", [AttrSizedOperandSegments,
     Optional<AnyShapeOrShiftType>:$shape,
     Variadic<AnyIntegerType>:$typeparams,
     Optional<fir_DummyScopeType>:$dummy_scope,
+    IndexAttr:$arg_no,
     Builtin_StringAttr:$uniq_name,
     OptionalAttr<fir_FortranVariableFlagsAttr>:$fortran_attrs,
     OptionalAttr<cuf_DataAttributeAttr>:$data_attr
@@ -106,6 +107,7 @@ def hlfir_DeclareOp : hlfir_Op<"declare", [AttrSizedOperandSegments,
     OpBuilder<(ins "mlir::Value":$memref, "llvm::StringRef":$uniq_name,
       CArg<"mlir::Value", "{}">:$shape, CArg<"mlir::ValueRange", "{}">:$typeparams,
       CArg<"mlir::Value", "{}">:$dummy_scope,
+      CArg<"unsigned", "0">:$arg_no,
       CArg<"fir::FortranVariableFlagsAttr", "{}">:$fortran_attrs,
       CArg<"cuf::DataAttributeAttr", "{}">:$data_attr)>];
 

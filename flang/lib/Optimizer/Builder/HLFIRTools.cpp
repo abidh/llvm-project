@@ -255,7 +255,7 @@ hlfir::genDeclare(mlir::Location loc, fir::FirOpBuilder &builder,
       },
       [](const auto &) {});
   auto declareOp = builder.create<hlfir::DeclareOp>(
-      loc, base, name, shapeOrShift, lenParams, dummyScope, flags, dataAttr);
+      loc, base, name, shapeOrShift, lenParams, dummyScope, /*arg_no=*/0, flags, dataAttr);
   return mlir::cast<fir::FortranVariableOpInterface>(declareOp.getOperation());
 }
 
@@ -1166,7 +1166,7 @@ hlfir::createTempFromMold(mlir::Location loc, fir::FirOpBuilder &builder,
   }
   auto declareOp =
       builder.create<hlfir::DeclareOp>(loc, alloc, tmpName, shape, lenParams,
-                                       /*dummy_scope=*/nullptr, declAttrs);
+                                       /*dummy_scope=*/nullptr, /*arg_no=*/0, declAttrs);
   if (mold.isPolymorphic()) {
     int rank = mold.getRank();
     // TODO: should probably read rank from the mold.
@@ -1205,7 +1205,7 @@ hlfir::Entity hlfir::createStackTempFromMold(mlir::Location loc,
   }
   auto declareOp =
       builder.create<hlfir::DeclareOp>(loc, alloc, tmpName, shape, lenParams,
-                                       /*dummy_scope=*/nullptr, declAttrs);
+                                       /*dummy_scope=*/nullptr, /*arg_no=*/0, declAttrs);
   return hlfir::Entity{declareOp.getBase()};
 }
 
@@ -1223,7 +1223,7 @@ hlfir::convertCharacterKind(mlir::Location loc, fir::FirOpBuilder &builder,
   return hlfir::EntityWithAttributes{builder.create<hlfir::DeclareOp>(
       loc, res.getAddr(), ".temp.kindconvert", /*shape=*/nullptr,
       /*typeparams=*/mlir::ValueRange{res.getLen()},
-      /*dummy_scope=*/nullptr, fir::FortranVariableFlagsAttr{})};
+      /*dummy_scope=*/nullptr, /*arg_no=*/0, fir::FortranVariableFlagsAttr{})};
 }
 
 std::pair<hlfir::Entity, std::optional<hlfir::CleanupFunction>>
@@ -1295,7 +1295,7 @@ hlfir::genTypeAndKindConvert(mlir::Location loc, fir::FirOpBuilder &builder,
         builder.create<fir::ShapeShiftOp>(loc, shapeShiftType, lbAndExtents);
     auto declareOp = builder.create<hlfir::DeclareOp>(
         loc, associate.getFirBase(), *associate.getUniqName(), shapeShift,
-        associate.getTypeparams(), /*dummy_scope=*/nullptr,
+        associate.getTypeparams(), /*dummy_scope=*/nullptr, /*arg_no=*/0,
         /*flags=*/fir::FortranVariableFlagsAttr{});
     hlfir::Entity castWithLbounds =
         mlir::cast<fir::FortranVariableOpInterface>(declareOp.getOperation());

@@ -482,7 +482,7 @@ static void genPrivateLikeInitRegion(mlir::OpBuilder &builder, RecipeOp recipe,
       auto alloca = builder.create<fir::AllocaOp>(loc, refTy.getEleTy());
       auto declareOp = builder.create<hlfir::DeclareOp>(
           loc, alloca, accPrivateInitName, /*shape=*/nullptr,
-          llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr,
+          llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
           fir::FortranVariableFlagsAttr{});
       retVal = declareOp.getBase();
     } else if (auto seqTy = mlir::dyn_cast_or_null<fir::SequenceType>(
@@ -504,7 +504,7 @@ static void genPrivateLikeInitRegion(mlir::OpBuilder &builder, RecipeOp recipe,
             loc, seqTy, /*typeparams=*/mlir::ValueRange{}, extents);
         auto declareOp = builder.create<hlfir::DeclareOp>(
             loc, alloca, accPrivateInitName, shape,
-            llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr,
+            llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
             fir::FortranVariableFlagsAttr{});
         retVal = declareOp.getBase();
       }
@@ -725,11 +725,11 @@ mlir::acc::FirstprivateRecipeOp Fortran::lower::createOrGetFirstprivateRecipe(
 
     auto leftDeclOp = builder.create<hlfir::DeclareOp>(
         loc, recipe.getCopyRegion().getArgument(0), llvm::StringRef{}, shape,
-        llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr,
+        llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
         fir::FortranVariableFlagsAttr{});
     auto rightDeclOp = builder.create<hlfir::DeclareOp>(
         loc, recipe.getCopyRegion().getArgument(1), llvm::StringRef{}, shape,
-        llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr,
+        llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
         fir::FortranVariableFlagsAttr{});
 
     hlfir::DesignateOp::Subscripts triplets =
@@ -1043,7 +1043,7 @@ static mlir::Value genReductionInitRegion(fir::FirOpBuilder &builder,
     mlir::Value alloca = builder.create<fir::AllocaOp>(loc, ty);
     auto declareOp = builder.create<hlfir::DeclareOp>(
         loc, alloca, accReductionInitName, /*shape=*/nullptr,
-        llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr,
+        llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
         fir::FortranVariableFlagsAttr{});
     builder.create<fir::StoreOp>(loc, builder.createConvert(loc, ty, initValue),
                                  declareOp.getBase());
@@ -1060,7 +1060,7 @@ static mlir::Value genReductionInitRegion(fir::FirOpBuilder &builder,
           loc, seqTy, /*typeparams=*/mlir::ValueRange{}, extents);
       auto declareOp = builder.create<hlfir::DeclareOp>(
           loc, alloca, accReductionInitName, shape,
-          llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr,
+          llvm::ArrayRef<mlir::Value>{}, /*dummy_scope=*/nullptr, /*arg_no=*/0,
           fir::FortranVariableFlagsAttr{});
       mlir::Type idxTy = builder.getIndexType();
       mlir::Type refTy = fir::ReferenceType::get(seqTy.getEleTy());
@@ -1213,10 +1213,10 @@ static void genCombiner(fir::FirOpBuilder &builder, mlir::Location loc,
                                    recipe.getCombinerRegion().getArguments());
       auto v1DeclareOp = builder.create<hlfir::DeclareOp>(
           loc, value1, llvm::StringRef{}, shape, llvm::ArrayRef<mlir::Value>{},
-          /*dummy_scope=*/nullptr, fir::FortranVariableFlagsAttr{});
+          /*dummy_scope=*/nullptr, /*arg_no=*/0, fir::FortranVariableFlagsAttr{});
       auto v2DeclareOp = builder.create<hlfir::DeclareOp>(
           loc, value2, llvm::StringRef{}, shape, llvm::ArrayRef<mlir::Value>{},
-          /*dummy_scope=*/nullptr, fir::FortranVariableFlagsAttr{});
+          /*dummy_scope=*/nullptr, /*arg_no=*/0, fir::FortranVariableFlagsAttr{});
       hlfir::DesignateOp::Subscripts triplets = getTripletsFromArgs(recipe);
 
       llvm::SmallVector<mlir::Value> lenParamsLeft;
