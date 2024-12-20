@@ -2876,7 +2876,7 @@ struct GlobalOpConversion : public fir::FIROpConversion<fir::GlobalOp> {
     llvm::ArrayRef<mlir::NamedAttribute> attrs;
     unsigned AS = 0;
     // Untill we fix the assertion that fails on aggregates
-    if (global.getType().isInteger())
+    //if (global.getType().isInteger())
       AS = getGlobalAddressSpace(rewriter);
     auto g = rewriter.create<mlir::LLVM::GlobalOp>(
         loc, tyAttr, isConst, linkage, global.getSymName(), initAttr, 0, AS,
