@@ -35,8 +35,6 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/IR/InstIterator.h"
-#include "llvm/IR/DebugInfoMetadata.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/IntrinsicInst.h"
 
 #include <any>
