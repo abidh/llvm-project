@@ -34,6 +34,10 @@
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/IntrinsicInst.h"
 
 #include <any>
 #include <cstdint>
@@ -4597,6 +4601,27 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
             moduleTranslation.lookupFunction(funcOp.getName());
         llvmFunc->dropAllReferences();
         llvmFunc->eraseFromParent();
+      } else {
+        llvm::Function *llvmFunc =
+            moduleTranslation.lookupFunction(funcOp.getName());
+        for (llvm::Instruction &I : instructions(llvmFunc)) {
+          if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
+            for (auto Loc : DDI->location_ops()) {
+              llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
+              ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+              DDI->setExpression(ExprBuilder.intoExpression());
+            }
+          }
+          for (llvm::DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
+            for (auto Loc : DVR.location_ops()) {
+              llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
+              ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+              DVR.setExpression(ExprBuilder.intoExpression());
+            }
+          }
+        }
       }
     }
     return success();
