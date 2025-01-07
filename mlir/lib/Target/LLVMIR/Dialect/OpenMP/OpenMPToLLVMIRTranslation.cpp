@@ -4601,25 +4601,55 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
         llvmFunc->eraseFromParent();
       } else {
         llvm::Function *llvmFunc =
-            moduleTranslation.lookupFunction(funcOp.getName());
+            moduleTranslation.lookupFunction(funcOp.getName());// abid
+
+        llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+        llvm::IRBuilderBase &builder = ompBuilder->Builder;
+        auto curInsert = builder.saveIP();
+        llvm::BasicBlock &funcEntryBlock = builder.GetInsertBlock()->getParent()->getEntryBlock();
+        builder.SetInsertPoint(funcEntryBlock.getFirstInsertionPt());
+        unsigned int allocaAS = ompBuilder->M.getDataLayout().getAllocaAddrSpace();
+        unsigned int defaultAS = ompBuilder->M.getDataLayout().getProgramAddressSpace();
+
+        llvm::DenseMap<llvm::Value *, llvm::Value *> argMapping;
+        for (llvm::Argument &llvmArg : llvmFunc->args()) {
+          llvm::Value *v = ompBuilder->Builder.CreateAlloca(llvmArg.getType(), allocaAS, nullptr);
+          if (allocaAS != defaultAS && llvmArg.getType()->isPointerTy())
+            v = ompBuilder->Builder.CreateAddrSpaceCast(v, ompBuilder->Builder.getPtrTy(defaultAS));
+
+          ompBuilder->Builder.CreateStore(&llvmArg, v);
+          argMapping[&llvmArg] = v;
+
+        }
+        builder.restoreIP(curInsert);
+        llvm::Type * int32Ty = llvm::Type::getInt32Ty(llvmFunc->getContext());
         for (llvm::Instruction &I : instructions(llvmFunc)) {
           if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
             for (auto Loc : DDI->location_ops()) {
               llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
-              ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
-              ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, ompBuilder->Builder.getPtrTy(allocaAS));
+              ExprBuilder.append<llvm::DIOp::Deref>(ompBuilder->Builder.getPtrTy(defaultAS));
+              ExprBuilder.append<llvm::DIOp::Deref>(int32Ty);
               DDI->setExpression(ExprBuilder.intoExpression());
+              auto iter = argMapping.find(Loc);
+              if (iter != argMapping.end())
+                DDI->replaceVariableLocationOp(Loc, iter->second);
             }
           }
           for (llvm::DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
             for (auto Loc : DVR.location_ops()) {
               llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
-              ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
-              ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+              ExprBuilder.append<llvm::DIOp::Arg>(0u, ompBuilder->Builder.getPtrTy(allocaAS));
+              ExprBuilder.append<llvm::DIOp::Deref>(ompBuilder->Builder.getPtrTy(defaultAS));
+              ExprBuilder.append<llvm::DIOp::Deref>(int32Ty);
               DVR.setExpression(ExprBuilder.intoExpression());
+              auto iter = argMapping.find(Loc);
+              if (iter != argMapping.end())
+                DVR.replaceVariableLocationOp(Loc, iter->second);
             }
           }
         }
+        llvmFunc->dump();
       }
     }
     return success();
