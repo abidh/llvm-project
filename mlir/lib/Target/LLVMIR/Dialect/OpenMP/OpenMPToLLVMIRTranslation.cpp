@@ -4623,19 +4623,18 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
           builder.restoreIP(curInsert);
           return v;
         };
-        llvm::Type * int32Ty = llvm::Type::getInt32Ty(llvmFunc->getContext());
         for (llvm::Instruction &I : instructions(llvmFunc)) {
           if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
             for (auto Loc : DDI->location_ops()) {
               llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
               ExprBuilder.append<llvm::DIOp::Arg>(0u, ompBuilder->Builder.getPtrTy(allocaAS));
-              if (llvm::Argument *arg = llvm::dyn_cast<llvm::Argument>(Loc)) {
+              if (llvm::isa<llvm::Argument>(Loc)) {
                 ExprBuilder.append<llvm::DIOp::Deref>(
                     ompBuilder->Builder.getPtrTy(defaultAS));
                 llvm::Value *V = genAlloca(Loc);
                 DDI->replaceVariableLocationOp(Loc, V);
               }
-              ExprBuilder.append<llvm::DIOp::Deref>(int32Ty);
+              ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
               DDI->setExpression(ExprBuilder.intoExpression());
             }
           }
@@ -4643,18 +4642,17 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
             for (auto Loc : DVR.location_ops()) {
               llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
               ExprBuilder.append<llvm::DIOp::Arg>(0u, ompBuilder->Builder.getPtrTy(allocaAS));
-              if (llvm::Argument *arg = llvm::dyn_cast<llvm::Argument>(Loc)) {
+              if (llvm::isa<llvm::Argument>(Loc)) {
                 ExprBuilder.append<llvm::DIOp::Deref>(
                     ompBuilder->Builder.getPtrTy(defaultAS));
                 llvm::Value *V = genAlloca(Loc);
                 DVR.replaceVariableLocationOp(Loc, V);
               }
-              ExprBuilder.append<llvm::DIOp::Deref>(int32Ty);
+              ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
               DVR.setExpression(ExprBuilder.intoExpression());
             }
           }
         }
-        llvmFunc->dump();
       }
     }
     return success();
