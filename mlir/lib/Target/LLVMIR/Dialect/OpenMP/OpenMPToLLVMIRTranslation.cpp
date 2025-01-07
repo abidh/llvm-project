@@ -4606,46 +4606,51 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
         llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
         llvm::IRBuilderBase &builder = ompBuilder->Builder;
         auto curInsert = builder.saveIP();
-        llvm::BasicBlock &funcEntryBlock = builder.GetInsertBlock()->getParent()->getEntryBlock();
-        builder.SetInsertPoint(funcEntryBlock.getFirstInsertionPt());
+        llvm::BasicBlock &funcEntryBlock =
+            builder.GetInsertBlock()->getParent()->getEntryBlock();
         unsigned int allocaAS = ompBuilder->M.getDataLayout().getAllocaAddrSpace();
         unsigned int defaultAS = ompBuilder->M.getDataLayout().getProgramAddressSpace();
 
-        llvm::DenseMap<llvm::Value *, llvm::Value *> argMapping;
-        for (llvm::Argument &llvmArg : llvmFunc->args()) {
-          llvm::Value *v = ompBuilder->Builder.CreateAlloca(llvmArg.getType(), allocaAS, nullptr);
-          if (allocaAS != defaultAS && llvmArg.getType()->isPointerTy())
-            v = ompBuilder->Builder.CreateAddrSpaceCast(v, ompBuilder->Builder.getPtrTy(defaultAS));
+        auto genAlloca = [&](llvm::Value *arg) {
+          builder.SetInsertPoint(funcEntryBlock.getFirstInsertionPt());
+          llvm::Value *v =
+              builder.CreateAlloca(arg->getType(), allocaAS, nullptr);
+          if (allocaAS != defaultAS && arg->getType()->isPointerTy())
+            v = ompBuilder->Builder.CreateAddrSpaceCast(
+                v, builder.getPtrTy(defaultAS));
 
-          ompBuilder->Builder.CreateStore(&llvmArg, v);
-          argMapping[&llvmArg] = v;
-
-        }
-        builder.restoreIP(curInsert);
+          builder.CreateStore(arg, v);
+          builder.restoreIP(curInsert);
+          return v;
+        };
         llvm::Type * int32Ty = llvm::Type::getInt32Ty(llvmFunc->getContext());
         for (llvm::Instruction &I : instructions(llvmFunc)) {
           if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
             for (auto Loc : DDI->location_ops()) {
               llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
               ExprBuilder.append<llvm::DIOp::Arg>(0u, ompBuilder->Builder.getPtrTy(allocaAS));
-              ExprBuilder.append<llvm::DIOp::Deref>(ompBuilder->Builder.getPtrTy(defaultAS));
+              if (llvm::Argument *arg = llvm::dyn_cast<llvm::Argument>(Loc)) {
+                ExprBuilder.append<llvm::DIOp::Deref>(
+                    ompBuilder->Builder.getPtrTy(defaultAS));
+                llvm::Value *V = genAlloca(Loc);
+                DDI->replaceVariableLocationOp(Loc, V);
+              }
               ExprBuilder.append<llvm::DIOp::Deref>(int32Ty);
               DDI->setExpression(ExprBuilder.intoExpression());
-              auto iter = argMapping.find(Loc);
-              if (iter != argMapping.end())
-                DDI->replaceVariableLocationOp(Loc, iter->second);
             }
           }
           for (llvm::DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
             for (auto Loc : DVR.location_ops()) {
               llvm::DIExprBuilder ExprBuilder(llvmFunc->getContext());
               ExprBuilder.append<llvm::DIOp::Arg>(0u, ompBuilder->Builder.getPtrTy(allocaAS));
-              ExprBuilder.append<llvm::DIOp::Deref>(ompBuilder->Builder.getPtrTy(defaultAS));
+              if (llvm::Argument *arg = llvm::dyn_cast<llvm::Argument>(Loc)) {
+                ExprBuilder.append<llvm::DIOp::Deref>(
+                    ompBuilder->Builder.getPtrTy(defaultAS));
+                llvm::Value *V = genAlloca(Loc);
+                DVR.replaceVariableLocationOp(Loc, V);
+              }
               ExprBuilder.append<llvm::DIOp::Deref>(int32Ty);
               DVR.setExpression(ExprBuilder.intoExpression());
-              auto iter = argMapping.find(Loc);
-              if (iter != argMapping.end())
-                DVR.replaceVariableLocationOp(Loc, iter->second);
             }
           }
         }
