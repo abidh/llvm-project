@@ -4606,8 +4606,7 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
         llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
         llvm::IRBuilderBase &builder = ompBuilder->Builder;
         auto curInsert = builder.saveIP();
-        llvm::BasicBlock &funcEntryBlock =
-            builder.GetInsertBlock()->getParent()->getEntryBlock();
+        llvm::BasicBlock &funcEntryBlock = llvmFunc->getEntryBlock();
         unsigned int allocaAS = ompBuilder->M.getDataLayout().getAllocaAddrSpace();
         unsigned int defaultAS = ompBuilder->M.getDataLayout().getProgramAddressSpace();
 
