@@ -4452,14 +4452,13 @@ handleDeclareTargetMapVar(MapInfoData &mapData,
 // a store of the kernel argument into this allocated memory which
 // will then be loaded from, ByCopy will use the allocated memory
 // directly.
-static llvm::IRBuilderBase::InsertPoint
-createDeviceArgumentAccessor(MapInfoData &mapData, llvm::Argument &arg,
-                             llvm::Value *input, llvm::Value *&retVal,
-                             llvm::IRBuilderBase &builder,
-                             llvm::OpenMPIRBuilder &ompBuilder,
-                             LLVM::ModuleTranslation &moduleTranslation,
-                             llvm::IRBuilderBase::InsertPoint allocaIP,
-                             llvm::IRBuilderBase::InsertPoint codeGenIP) {
+static llvm::IRBuilderBase::InsertPoint createDeviceArgumentAccessor(
+    MapInfoData &mapData, llvm::Argument &arg, llvm::Value *input,
+    llvm::Value *&debugVal, llvm::Value *&retVal, bool &isCopy,
+    llvm::IRBuilderBase &builder, llvm::OpenMPIRBuilder &ompBuilder,
+    LLVM::ModuleTranslation &moduleTranslation,
+    llvm::IRBuilderBase::InsertPoint allocaIP,
+    llvm::IRBuilderBase::InsertPoint codeGenIP) {
   builder.restoreIP(allocaIP);
 
   omp::VariableCaptureKind capture = omp::VariableCaptureKind::ByRef;
@@ -4480,6 +4479,7 @@ createDeviceArgumentAccessor(MapInfoData &mapData, llvm::Argument &arg,
 
   // Create the alloca for the argument the current point.
   llvm::Value *v = builder.CreateAlloca(arg.getType(), allocaAS, nullptr);
+  debugVal = v;
 
   if (allocaAS != defaultAS && arg.getType()->isPointerTy())
     v = builder.CreateAddrSpaceCast(v, builder.getPtrTy(defaultAS));
@@ -4488,12 +4488,14 @@ createDeviceArgumentAccessor(MapInfoData &mapData, llvm::Argument &arg,
 
   builder.restoreIP(codeGenIP);
 
+  isCopy = true;
   switch (capture) {
   case omp::VariableCaptureKind::ByCopy: {
     retVal = v;
     break;
   }
   case omp::VariableCaptureKind::ByRef: {
+    isCopy = false;
     retVal = builder.CreateAlignedLoad(
         v->getType(), v,
         ompBuilder.M.getDataLayout().getPrefTypeAlign(v->getType()));
@@ -4991,7 +4993,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   };
 
   auto argAccessorCB = [&](llvm::Argument &arg, llvm::Value *input,
-                           llvm::Value *&retVal, InsertPointTy allocaIP,
+                           llvm::Value *&debugVal, llvm::Value *&retVal,
+                           bool &isCopy, InsertPointTy allocaIP,
                            InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::InsertPointOrErrorTy {
     // We just return the unaltered argument for the host function
@@ -5001,12 +5004,14 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     // host and device, currently not always the case)
     if (!isTargetDevice) {
       retVal = cast<llvm::Value>(&arg);
+      debugVal = retVal;
+      isCopy = true;
       return codeGenIP;
     }
 
-    return createDeviceArgumentAccessor(mapData, arg, input, retVal, builder,
-                                        *ompBuilder, moduleTranslation,
-                                        allocaIP, codeGenIP);
+    return createDeviceArgumentAccessor(mapData, arg, input, debugVal, retVal,
+                                        isCopy, builder, *ompBuilder,
+                                        moduleTranslation, allocaIP, codeGenIP);
   };
 
   llvm::OpenMPIRBuilder::TargetKernelRuntimeAttrs runtimeAttrs;

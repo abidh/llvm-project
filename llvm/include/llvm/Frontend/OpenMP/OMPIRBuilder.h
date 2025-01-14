@@ -3031,8 +3031,8 @@ public:
       InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
 
   using TargetGenArgAccessorsCallbackTy = function_ref<InsertPointOrErrorTy(
-      Argument &Arg, Value *Input, Value *&RetVal, InsertPointTy AllocaIP,
-      InsertPointTy CodeGenIP)>;
+      Argument &Arg, Value *Input, Value *&DebugVal, Value *&RetVal,
+      bool &isCopy, InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
 
   /// Generator for '#omp target'
   ///
