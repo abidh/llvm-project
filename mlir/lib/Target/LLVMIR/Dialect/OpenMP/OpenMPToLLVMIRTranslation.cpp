@@ -5166,8 +5166,28 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
 
   if (LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(op)) {
     llvm::Module *llvmModule = moduleTranslation.getLLVMModule();
+    llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+    if (ompBuilder->Config.isTargetDevice()) {
+      llvm::GlobalVariable *GV =
+          llvmModule->getGlobalVariable(gOp.getSymName());
+      if (GV) {
+        llvm::SmallVector<llvm::DIGlobalVariableExpression *> GVEs;
+        GV->getDebugInfo(GVEs);
+        GV->eraseMetadata(llvm::LLVMContext::MD_dbg);
+        llvm::DIExprBuilder ExprBuilder(llvmModule->getContext());
+        auto ptrTy = llvm::PointerType::get(llvmModule->getContext(), 1);
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, ptrTy);
+        ExprBuilder.append<llvm::DIOp::Deref>(GV->getType());
+        // TODO: Take care of any existing expression in the GVE
+        for (auto *GVE : GVEs) {
+          auto *newGVE = llvm::DIGlobalVariableExpression::get(
+              llvmModule->getContext(), GVE->getVariable(),
+              ExprBuilder.intoExpression());
+          GV->addDebugInfo(newGVE);
+        }
+      }
+    }
     if (auto *gVal = llvmModule->getNamedValue(gOp.getSymName())) {
-      llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
       bool isDeclaration = gOp.isDeclaration();
       bool isExternallyVisible =
           gOp.getVisibility() != mlir::SymbolTable::Visibility::Private;

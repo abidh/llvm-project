@@ -1095,6 +1095,7 @@ LogicalResult ModuleTranslation::convertGlobals() {
         llvm::DIGlobalVariableExpression *diGlobalExpr =
             debugTranslation->translateGlobalVariableExpression(exprAttr);
         llvm::DIGlobalVariable *diGlobalVar = diGlobalExpr->getVariable();
+
         var->addDebugInfo(diGlobalExpr);
 
         // There is no `globals` field in DICompileUnitAttr which can be
