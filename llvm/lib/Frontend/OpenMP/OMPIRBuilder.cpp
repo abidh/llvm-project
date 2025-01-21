@@ -355,8 +355,11 @@ BasicBlock *llvm::splitBB(IRBuilderBase &Builder, bool CreateBranch,
                           llvm::Twine Name) {
   DebugLoc DebugLoc = Builder.getCurrentDebugLocation();
   BasicBlock *New = splitBB(Builder.saveIP(), CreateBranch, Name);
-  if (CreateBranch)
+  if (CreateBranch) {
+    if (Builder.GetInsertBlock()->getTerminator())
+      Builder.AddMetadataToInst(Builder.GetInsertBlock()->getTerminator());
     Builder.SetInsertPoint(Builder.GetInsertBlock()->getTerminator());
+  }
   else
     Builder.SetInsertPoint(Builder.GetInsertBlock());
   // SetInsertPoint also updates the Builder's debug location, but we want to
@@ -364,7 +367,7 @@ BasicBlock *llvm::splitBB(IRBuilderBase &Builder, bool CreateBranch,
   Builder.SetCurrentDebugLocation(DebugLoc);
   return New;
 }
-
+/*
 BasicBlock *llvm::splitBB(IRBuilder<> &Builder, bool CreateBranch,
                           llvm::Twine Name) {
   DebugLoc DebugLoc = Builder.getCurrentDebugLocation();
@@ -378,7 +381,7 @@ BasicBlock *llvm::splitBB(IRBuilder<> &Builder, bool CreateBranch,
   Builder.SetCurrentDebugLocation(DebugLoc);
   return New;
 }
-
+*/
 BasicBlock *llvm::splitBBWithSuffix(IRBuilderBase &Builder, bool CreateBranch,
                                     llvm::Twine Suffix) {
   BasicBlock *Old = Builder.GetInsertBlock();
@@ -6905,7 +6908,8 @@ static Expected<Function *> createOutlinedFunction(
       splitBB(Builder, /*CreateBranch=*/true, "outlined.body");
   llvm::OpenMPIRBuilder::InsertPointOrErrorTy AfterIP = CBFunc(
       Builder.saveIP(),
-      OpenMPIRBuilder::InsertPointTy(OutlinedBodyBB, OutlinedBodyBB->begin()));
+      OpenMPIRBuilder::InsertPointTy(OutlinedBodyBB, OutlinedBodyBB->begin()),
+      Builder.getCurrentDebugLocation());
   if (!AfterIP)
     return AfterIP.takeError();
   Builder.restoreIP(*AfterIP);

@@ -4280,7 +4280,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   }
 
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
-  auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP)
+  auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP, llvm::DebugLoc debugLoc)
       -> llvm::OpenMPIRBuilder::InsertPointOrErrorTy {
     // Forward target-cpu and target-features function attributes from the
     // original function to the new outlined function.
@@ -4332,8 +4332,11 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                     });
 
     builder.restoreIP(codeGenIP);
+    auto DL = builder.getCurrentDebugLocation();
+    builder.SetCurrentDebugLocation(debugLoc);
     llvm::Expected<llvm::BasicBlock *> exitBlock = convertOmpOpRegions(
         targetRegion, "omp.target", builder, moduleTranslation);
+    builder.SetCurrentDebugLocation(DL);
 
     if (!exitBlock)
       return exitBlock.takeError();

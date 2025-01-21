@@ -73,7 +73,7 @@ BasicBlock *splitBB(IRBuilderBase &Builder, bool CreateBranch,
 /// degenerate (missing the terminator).  Its new insert location will stick to
 /// after the instruction before the insertion point (instead of moving with the
 /// instruction the InsertPoint stores internally).
-BasicBlock *splitBB(IRBuilder<> &Builder, bool CreateBranch, llvm::Twine Name);
+// BasicBlock *splitBB(IRBuilder<> &Builder, bool CreateBranch, llvm::Twine Name);
 
 /// Like splitBB, but reuses the current block's name for the new name.
 BasicBlock *splitBBWithSuffix(IRBuilderBase &Builder, bool CreateBranch,
@@ -2985,7 +2985,7 @@ public:
       Value *SrcLocInfo = nullptr);
 
   using TargetBodyGenCallbackTy = function_ref<InsertPointOrErrorTy(
-      InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
+      InsertPointTy AllocaIP, InsertPointTy CodeGenIP, DebugLoc debugLoc)>;
 
   using TargetGenArgAccessorsCallbackTy = function_ref<InsertPointOrErrorTy(
       Argument &Arg, Value *Input, Value *&RetVal, InsertPointTy AllocaIP,
