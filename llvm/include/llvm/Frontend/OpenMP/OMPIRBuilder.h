@@ -42,7 +42,7 @@ class OpenMPIRBuilder;
 /// \p IP insert block remains degenerate and it is up to the caller to insert a
 /// terminator.
 void spliceBB(IRBuilderBase::InsertPoint IP, BasicBlock *New,
-              bool CreateBranch);
+              bool CreateBranch, DebugLoc DL);
 
 /// Splice a BasicBlock at an IRBuilder's current insertion point. Its new
 /// insert location will stick to after the instruction before the insertion
@@ -60,7 +60,7 @@ void spliceBB(IRBuilder<> &Builder, BasicBlock *New, bool CreateBranch);
 /// remains degenerate and it is the caller's responsibility to insert a
 /// terminator. Returns the new successor block.
 BasicBlock *splitBB(IRBuilderBase::InsertPoint IP, bool CreateBranch,
-                    llvm::Twine Name = {});
+                    DebugLoc DL, llvm::Twine Name = {});
 
 /// Split a BasicBlock at \p Builder's insertion point, even if the block is
 /// degenerate (missing the terminator).  Its new insert location will stick to
@@ -2985,7 +2985,7 @@ public:
       Value *SrcLocInfo = nullptr);
 
   using TargetBodyGenCallbackTy = function_ref<InsertPointOrErrorTy(
-      InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
+      InsertPointTy AllocaIP, InsertPointTy CodeGenIP, DebugLoc debugLoc)>;
 
   using TargetGenArgAccessorsCallbackTy = function_ref<InsertPointOrErrorTy(
       Argument &Arg, Value *Input, Value *&RetVal, InsertPointTy AllocaIP,
@@ -3664,6 +3664,26 @@ public:
   /// Invalidate this loop. That is, the underlying IR does not fulfill the
   /// requirements of an OpenMP canonical loop anymore.
   void invalidate();
+};
+
+// In OpenMP code generation, we have to switch back and forth between host
+// and target. This RAII object that stores the current debug location and
+// restores it when destroyed. Similar to InsertPointGuard but only for
+// DebugLoc.
+class DebugLocGuard {
+  IRBuilderBase &Builder;
+  DebugLoc DbgLoc;
+
+  public:
+    DebugLocGuard(llvm::IRBuilderBase &B)
+        : Builder(B), DbgLoc(B.getCurrentDebugLocation()) {}
+
+    DebugLocGuard(const DebugLocGuard &) = delete;
+    DebugLocGuard &operator=(const DebugLocGuard &) = delete;
+
+    ~DebugLocGuard() {
+      Builder.SetCurrentDebugLocation(DbgLoc);
+    }
 };
 
 } // end namespace llvm

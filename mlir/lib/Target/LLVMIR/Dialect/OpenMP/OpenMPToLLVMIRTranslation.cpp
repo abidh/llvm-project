@@ -33,6 +33,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/IR/DebugLoc.h"
 
 #include <any>
 #include <cstdint>
@@ -1361,7 +1362,7 @@ allocatePrivateVars(llvm::IRBuilderBase &builder,
       llvm::cast<llvm::BranchInst>(allocaIP.getBlock()->getTerminator());
   splitBB(llvm::OpenMPIRBuilder::InsertPointTy(allocaIP.getBlock(),
                                                allocaTerminator->getIterator()),
-          true, "omp.region.after_alloca");
+          true, builder.getCurrentDebugLocation(), "omp.region.after_alloca");
 
   llvm::IRBuilderBase::InsertPointGuard guard(builder);
   // Update the allocaTerminator in case the alloca block was split above.
@@ -4236,8 +4237,11 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   }
 
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
-  auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP)
+  auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP, llvm::DebugLoc debugLoc)
       -> llvm::OpenMPIRBuilder::InsertPointOrErrorTy {
+
+    //llvm::DebugLocGuard dbgGuard(builder);
+    builder.SetCurrentDebugLocation(debugLoc);
     // Forward target-cpu and target-features function attributes from the
     // original function to the new outlined function.
     llvm::Function *llvmParentFn =
