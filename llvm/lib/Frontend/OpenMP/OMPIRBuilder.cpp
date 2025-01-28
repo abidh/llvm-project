@@ -323,7 +323,7 @@ void llvm::spliceBB(IRBuilderBase::InsertPoint IP, BasicBlock *New,
 
   if (CreateBranch) {
     auto *NewBr = BranchInst::Create(New, Old);
-    //NewBr->setDebugLoc(DL);
+    NewBr->setDebugLoc(DL);
   }
 }
 
