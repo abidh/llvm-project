@@ -6954,11 +6954,15 @@ static void FixupDebugInfoForOutlinedFunction(
   if (!NewSP)
     return;
 
+  Module *M = Func->getParent();
+  DICompileUnit *CU = NewSP->getUnit();
+  DIBuilder DB(*M, true, CU);
+  bool isAMDGPU((Triple(M->getTargetTriple())).isAMDGPU());
   DenseMap<const MDNode *, MDNode *> Cache;
   SmallDenseMap<DILocalVariable *, DILocalVariable *> RemappedVariables;
 
-  auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, unsigned arg) {
-    auto NewSP = Func->getSubprogram();
+  auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, unsigned arg,
+                                  bool IsCopy) {
     DILocalVariable *&NewVar = RemappedVariables[OldVar];
     // Only use cached variable if the arg number matches. This is important
     // so that DIVariable created for privatized variables are not discarded.
@@ -6967,24 +6971,64 @@ static void FixupDebugInfoForOutlinedFunction(
 
     DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
         *OldVar->getScope(), *NewSP, Builder.getContext(), Cache);
+    DIType *VarType = OldVar->getType();
+    if (!IsCopy)
+      VarType = DB.createQualifiedType(dwarf::DW_TAG_reference_type,
+                                       OldVar->getType());
     NewVar = llvm::DILocalVariable::get(
         Builder.getContext(), NewScope, OldVar->getName(), OldVar->getFile(),
-        OldVar->getLine(), OldVar->getType(), arg, OldVar->getFlags(),
-        OldVar->getAlignInBits(), OldVar->getAnnotations());
+        OldVar->getLine(), VarType, arg, OldVar->getFlags(),
+        OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
+        OldVar->getAnnotations());
+
     return NewVar;
   };
 
   auto UpdateDebugRecord = [&](auto *DR) {
     DILocalVariable *OldVar = DR->getVariable();
     unsigned ArgNo = 0;
+    bool IsCopy = true;
+    Value *DebugLoc = nullptr;
+    Value *InputCopy = nullptr;
     for (auto Loc : DR->location_ops()) {
+      InputCopy = Loc;
       auto Iter = ValueReplacementMap.find(Loc);
       if (Iter != ValueReplacementMap.end()) {
-        DR->replaceVariableLocationOp(Loc, std::get<0>(Iter->second));
+        InputCopy = std::get<0>(Iter->second);
         ArgNo = std::get<1>(Iter->second) + 1;
       }
+      // For target side, the ArgAccessorFuncCB/createDeviceArgumentAccessor
+      // adds following for the kenel arguments.
+      // %3 = alloca ptr, align 8, addrspace(5), !dbg !26
+      // %4 = addrspacecast ptr addrspace(5) %3 to ptr, !dbg !26
+      // store ptr %1, ptr %4, align 8, !dbg !26
+
+      // For arguments that are passed by ref, there is an extra load like the
+      // following.
+      // %8 = load ptr, ptr %4, align 8
+      //
+      // The correct debug info for the amdgpu target comes if we use the
+      // alloca location in here. Also if the variable is passed by ref, we
+      // need to change its type to reflect this in debug info.  The IsCopy
+      // flag is used for this.
+      if (llvm::LoadInst *Load = dyn_cast<llvm::LoadInst>(InputCopy)) {
+        IsCopy = false;
+        DebugLoc = removeASCastIfPresent(Load->getPointerOperand());
+      } else
+        DebugLoc = removeASCastIfPresent(InputCopy);
+
+      DR->replaceVariableLocationOp(Loc, DebugLoc);
     }
-    DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
+
+    // AMDGPU backend needs these DIOps based expression.
+    if (isAMDGPU && DebugLoc && InputCopy) {
+      llvm::DIExprBuilder ExprBuilder(Builder.getContext());
+      ExprBuilder.append<llvm::DIOp::Arg>(0u, DebugLoc->getType());
+      ExprBuilder.append<llvm::DIOp::Deref>(InputCopy->getType());
+      DR->setExpression(ExprBuilder.intoExpression());
+    }
+
+    DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo, IsCopy));
   };
 
   // The location and scope of variable intrinsics and records still point to
@@ -6998,9 +7042,6 @@ static void FixupDebugInfoForOutlinedFunction(
   }
   // An extra argument is passed to the device. Create the debug data for it.
   if (OMPBuilder.Config.isTargetDevice()) {
-    DICompileUnit *CU = NewSP->getUnit();
-    Module *M = Func->getParent();
-    DIBuilder DB(*M, true, CU);
     DIType *VoidPtrTy =
         DB.createQualifiedType(dwarf::DW_TAG_pointer_type, nullptr);
     DILocalVariable *Var = DB.createParameterVariable(
