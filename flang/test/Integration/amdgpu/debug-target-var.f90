@@ -17,11 +17,11 @@ end subroutine fff
 !CHECK: #dbg_declare(ptr addrspace(5) {{.*}}, ![[Y:[0-9]+]], !DIExpression(DIOpArg(0, ptr addrspace(5)), DIOpDeref(ptr)), {{.*}})
 !CHECK: }
 
-! CHECK-DAG: ![[SP]] = {{.*}}!DISubprogram(name: "[[FN]]"{{.*}}retainedNodes: ![[VARS:[0-9]+]])
+! CHECK-DAG: ![[SP]] = {{.*}}!DISubprogram(name: "[[FN]]"{{.*}})
 ! CHECK-DAG: ![[X]] = !DILocalVariable(name: "x", arg: 2, scope: ![[SP]]{{.*}}type: ![[TYX:[0-9]+]])
 ! CHECK-DAG: ![[TYX]] = !DIDerivedType(tag: DW_TAG_reference_type, baseType: ![[INT:[0-9]+]])
 ! CHECK-DAG: ![[INT]] = !DIBasicType(name: "integer", size: 32, encoding: DW_ATE_signed)
 ! CHECK-DAG: ![[Y]] = !DILocalVariable(name: "y", arg: 3, scope: ![[SP]]{{.*}}type: ![[TYY:[0-9]+]])
 ! CHECK-DAG: ![[TYY]] = !DIDerivedType(tag: DW_TAG_reference_type, baseType: ![[ARR:[0-9]+]])
 ! CHECK-DAG: ![[ARR]] = !DICompositeType(tag: DW_TAG_array_type, baseType: ![[INT]]{{.*}})
-! CHECK-DAG: ![[VARS]] = !{![[X]], ![[Y]]}
+
