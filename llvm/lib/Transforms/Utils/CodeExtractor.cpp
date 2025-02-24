@@ -1253,8 +1253,8 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
   auto IsInvalidLocation = [&NewFunc](Value *Location) {
     // Location is invalid if it isn't a constant or an instruction, or is an
     // instruction but isn't in the new function.
-    if (!Location ||
-        (!isa<Constant>(Location) && !isa<Instruction>(Location)))
+    if (!Location || (!isa<Argument>(Location) && !isa<Constant>(Location) &&
+                      !isa<Instruction>(Location)))
       return true;
     Instruction *LocationInst = dyn_cast<Instruction>(Location);
     return LocationInst && LocationInst->getFunction() != &NewFunc;
@@ -1276,10 +1276,16 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
     if (!NewVar) {
       DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
           *OldVar->getScope(), *NewSP, Ctx, Cache);
-      NewVar = DIB.createAutoVariable(
-          NewScope, OldVar->getName(), OldVar->getFile(), OldVar->getLine(),
-          OldVar->getType(), /*AlwaysPreserve=*/false, DINode::FlagZero,
-          OldVar->getAlignInBits());
+      if (OldVar->isParameter())
+        NewVar = DIB.createParameterVariable(
+            NewScope, OldVar->getName(), OldVar->getArg(), OldVar->getFile(),
+            OldVar->getLine(), OldVar->getType(), /*AlwaysPreserve=*/false,
+            DINode::FlagZero);
+      else
+        NewVar = DIB.createAutoVariable(
+            NewScope, OldVar->getName(), OldVar->getFile(), OldVar->getLine(),
+            OldVar->getType(), /*AlwaysPreserve=*/false, DINode::FlagZero,
+            OldVar->getAlignInBits());
     }
     return cast<DILocalVariable>(NewVar);
   };
@@ -1623,6 +1629,22 @@ void CodeExtractor::emitFunctionBody(
       if (Instruction *inst = dyn_cast<Instruction>(use))
         if (Blocks.count(inst->getParent()))
           inst->replaceUsesOfWith(inputs[i], RewriteVal);
+
+    SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
+    SmallVector<DbgVariableRecord *, 1> DPUsers;
+    findDbgUsers(DbgUsers, inputs[i], &DPUsers);
+    for (auto *DII : DbgUsers)
+      DII->replaceVariableLocationOp(inputs[i], RewriteVal);
+    for (auto *DVR : DPUsers) {
+      DVR->replaceVariableLocationOp(inputs[i], RewriteVal);
+      DILocalVariable *OldVar = DVR->getVariable();
+      DILocalVariable *Var = llvm::DILocalVariable::get(
+          header->getContext(), OldVar->getScope(), OldVar->getName(),
+          OldVar->getFile(), OldVar->getLine(), OldVar->getType(), i + 1,
+          OldVar->getFlags(), OldVar->getAlignInBits(),
+          OldVar->getAnnotations());
+      DVR->setVariable(Var);
+    }
   }
 
   // Since there may be multiple exits from the original region, make the new
