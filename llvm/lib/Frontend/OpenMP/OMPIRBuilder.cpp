@@ -33,6 +33,7 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -751,7 +752,7 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
     // CodeExtractor generates correct code for extracted functions
     // which are used by OpenMP runtime.
     bool ArgsInZeroAddressSpace = Config.isTargetDevice();
-    CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
+    CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr, // abid
                             /* AggregateArgs */ true,
                             /* BlockFrequencyInfo */ nullptr,
                             /* BranchProbabilityInfo */ nullptr,
@@ -1645,6 +1646,52 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
 
   Extractor.findInputsOutputs(Inputs, Outputs, SinkingCands,
                               /*CollectGlobalInputs=*/true);
+
+  if (OuterFn && OuterFn->getSubprogram()) {
+    DISubprogram *SP = OuterFn->getSubprogram();
+    auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, Value *V) {
+      DICompileUnit *CU = SP->getUnit();
+      Module *M = OuterFn->getParent();
+      DIBuilder DB(*M, true, CU);
+      DILocalVariable *Var = llvm::DILocalVariable::get(
+          Builder.getContext(), SP, OldVar->getName(),
+          OldVar->getFile(), OldVar->getLine(), OldVar->getType(), 0,
+          OldVar->getFlags(), OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
+          OldVar->getAnnotations());
+      auto Loc = DILocation::get(OuterFn->getContext(), 0, 0, SP, 0);
+      DB.insertDeclare(V, Var, DB.createExpression(), Loc, PRegEntryBB);
+    };
+    auto CreateDIVariable = [&](StringRef name, Value *V) {
+      DICompileUnit *CU = SP->getUnit();
+      Module *M = OuterFn->getParent();
+      DIBuilder DB(*M, true, CU);
+      DIBasicType *IntTy =
+          DB.createBasicType("int", /*SizeInBits=*/32,
+                             /*Encoding=*/llvm::dwarf::DW_ATE_signed);
+      DILocalVariable *Var =
+          DB.createAutoVariable(SP, name, SP->getFile(),
+                                /*LineNo=*/0, IntTy, /*AlwaysPreserve=*/false,
+                                DINode::DIFlags::FlagArtificial,
+                                dwarf::DW_MSPACE_LLVM_none);
+      auto Loc = DILocation::get(OuterFn->getContext(), 0, 0, SP, 0);
+      DB.insertDeclare(V, Var, DB.createExpression(), Loc, PRegEntryBB);
+    };
+    for (unsigned i = 0, e = Inputs.size(); i != e; ++i) { // abid
+      SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
+      SmallVector<DbgVariableRecord *, 1> DPUsers;
+      if(isa<GlobalValue>(Inputs[i]))
+        continue;
+      findDbgUsers(DbgUsers, Inputs[i], &DPUsers);
+      for (auto *DII : DbgUsers) {
+        GetUpdatedDIVariable(DII->getVariable(), Inputs[i]);
+      }
+      for (auto *DVR : DPUsers) {
+        GetUpdatedDIVariable(DVR->getVariable(), Inputs[i]);
+      }
+    }
+    CreateDIVariable("tid", TIDAddrAlloca);
+    CreateDIVariable("zero", ZeroAddrAlloca);
+  }
 
   Inputs.remove_if([&](Value *I) {
     if (auto *GV = dyn_cast_if_present<GlobalVariable>(I))
@@ -6997,7 +7044,7 @@ static void FixupDebugInfoForOutlinedFunction(
 
   // The location and scope of variable intrinsics and records still point to
   // the parent function of the target region. Update them.
-  for (Instruction &I : instructions(Func)) {
+  for (Instruction &I : instructions(Func)) { // abid
     if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I))
       UpdateDebugRecord(DDI);
 
