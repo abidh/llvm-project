@@ -1641,6 +1641,13 @@ void CodeExtractor::emitFunctionBody(
 
   moveCodeToFunction(newFunction);
 
+  auto UpdateDebugRecord = [&](auto *DR, Value *V, Value *N) {
+    for (auto Loc : DR->location_ops()) {
+      if (Loc == V)
+        DR->replaceVariableLocationOp(Loc, N);
+    }
+  };
+
   for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
     Value *RewriteVal = NewValues[i];
 
@@ -1650,21 +1657,42 @@ void CodeExtractor::emitFunctionBody(
         if (Blocks.count(inst->getParent()))
           inst->replaceUsesOfWith(inputs[i], RewriteVal);
 
-    SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
+    Value *val = inputs[i];
+    if (LoadInst *Load = dyn_cast<LoadInst>(val))
+      val = Load->getPointerOperand();
+    Module *M = newFunction->getParent();
+    llvm::DIExprBuilder EB(newFunction->getContext());
+    EB.append<llvm::DIOp::Arg>(0u, val->getType());
+    EB.append<llvm::DIOp::Deref>(val->getType());
+    llvm::DIExpression *Expr = EB.intoExpression();
+    for (Instruction &I : instructions(newFunction)) { // abid
+      if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
+          UpdateDebugRecord(DDI, val, RewriteVal);
+          if ((Triple(M->getTargetTriple())).isAMDGPU())
+            DDI->setExpression(Expr);
+      }
+    
+      for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
+          UpdateDebugRecord(&DVR, val, RewriteVal);
+          if ((Triple(M->getTargetTriple())).isAMDGPU())
+            DVR.setExpression(Expr);
+      }
+    } 
+    /*SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
     SmallVector<DbgVariableRecord *, 1> DPUsers;
-    findDbgUsers(DbgUsers, inputs[i], &DPUsers);
+    findDbgUsers(DbgUsers, val, &DPUsers);
     for (auto *DII : DbgUsers)
-      DII->replaceVariableLocationOp(inputs[i], RewriteVal);
+      DII->replaceVariableLocationOp(val, RewriteVal);
     for (auto *DVR : DPUsers) {
-      DVR->replaceVariableLocationOp(inputs[i], RewriteVal);
+      DVR->replaceVariableLocationOp(val, RewriteVal);
       DILocalVariable *OldVar = DVR->getVariable();
       DILocalVariable *Var = llvm::DILocalVariable::get(
           header->getContext(), OldVar->getScope(), OldVar->getName(),
-          OldVar->getFile(), OldVar->getLine(), OldVar->getType(), i + 1,
+          OldVar->getFile(), OldVar->getLine(), OldVar->getType(), i + 3,
           OldVar->getFlags(), OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
           OldVar->getAnnotations());
       DVR->setVariable(Var);
-    }
+    }*/
   }
 
   // Since there may be multiple exits from the original region, make the new
