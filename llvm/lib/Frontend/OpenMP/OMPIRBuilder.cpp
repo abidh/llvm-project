@@ -800,6 +800,15 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
       BasicBlock &ArtificialEntry = OutlinedFn->getEntryBlock();
       assert(ArtificialEntry.getUniqueSuccessor() == OI.EntryBB);
       assert(OI.EntryBB->getUniquePredecessor() == &ArtificialEntry);
+      Instruction *EBT = OI.EntryBB->getTerminator();
+      Instruction *ABT = ArtificialEntry.getTerminator();
+      if (ABT && EBT && ABT->DebugMarker) {
+        OI.EntryBB->createMarker(EBT);
+        EBT->DebugMarker->absorbDebugValues(*(ABT->DebugMarker), true);
+        /*for (DbgVariableRecord &DVR : filterDbgVars(ABT->getDbgRecordRange()))
+        { EBT->DebugMarker->insertDbgRecord(&DVR, false);
+        }*/
+      }
       // Move instructions from the to-be-deleted ArtificialEntry to the entry
       // basic block of the parallel region. CodeExtractor generates
       // instructions to unwrap the aggregate argument and may sink
@@ -1454,54 +1463,6 @@ hostParallelCallback(OpenMPIRBuilder *OMPIRBuilder, Function &OutlinedFn,
   }
 }
 
-static void fixupVariable(IRBuilder<> &Builder, llvm::Function *OuterFn, SetVector<Value *> &Inputs, BasicBlock *BB) { // abid
-  if (OuterFn && OuterFn->getSubprogram()) {
-    DISubprogram *SP = OuterFn->getSubprogram();
-    auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, Value *V) {
-      DICompileUnit *CU = SP->getUnit();
-      Module *M = OuterFn->getParent();
-      DIBuilder DB(*M, true, CU);
-      DILocalVariable *Var = llvm::DILocalVariable::get(
-          Builder.getContext(), SP, OldVar->getName(),
-          OldVar->getFile(), OldVar->getLine(), OldVar->getType(), 0,
-          OldVar->getFlags(), OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
-          OldVar->getAnnotations());
-      auto Loc = DILocation::get(OuterFn->getContext(), 0, 0, SP, 0);
-      DB.insertDeclare(V, Var, DB.createExpression(), Loc, BB);
-    };
-    auto CreateDIVariable = [&](StringRef name, Value *V) {
-      DICompileUnit *CU = SP->getUnit();
-      Module *M = OuterFn->getParent();
-      DIBuilder DB(*M, true, CU);
-      DIBasicType *IntTy =
-          DB.createBasicType("int", /*SizeInBits=*/32,
-                             /*Encoding=*/llvm::dwarf::DW_ATE_signed);
-      DILocalVariable *Var =
-          DB.createAutoVariable(SP, name, SP->getFile(),
-                                /*LineNo=*/0, IntTy, /*AlwaysPreserve=*/false,
-                                DINode::DIFlags::FlagArtificial,
-                                dwarf::DW_MSPACE_LLVM_none);
-      auto Loc = DILocation::get(OuterFn->getContext(), 0, 0, SP, 0);
-      DB.insertDeclare(V, Var, DB.createExpression(), Loc, BB);
-    };
-    for (unsigned i = 0, e = Inputs.size(); i != e; ++i) { // abid
-      SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
-      SmallVector<DbgVariableRecord *, 1> DPUsers;
-      if(isa<GlobalValue>(Inputs[i]))
-        continue;
-      findDbgUsers(DbgUsers, Inputs[i], &DPUsers);
-      for (auto *DII : DbgUsers) {
-        GetUpdatedDIVariable(DII->getVariable(), Inputs[i]);
-      }
-      for (auto *DVR : DPUsers) {
-        GetUpdatedDIVariable(DVR->getVariable(), Inputs[i]);
-      }
-    }
-    //CreateDIVariable("tid", TIDAddrAlloca);
-    //CreateDIVariable("zero", ZeroAddrAlloca);
-  }
-}
-
 OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
     const LocationDescription &Loc, InsertPointTy OuterAllocaIP,
     BodyGenCallbackTy BodyGenCB, PrivatizeCallbackTy PrivCB,
@@ -1695,7 +1656,6 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
   Extractor.findInputsOutputs(Inputs, Outputs, SinkingCands,
                               /*CollectGlobalInputs=*/true);
 
-  fixupVariable(Builder, OuterFn, Inputs, OI.EntryBB);
   Inputs.remove_if([&](Value *I) {
     if (auto *GV = dyn_cast_if_present<GlobalVariable>(I))
       return GV->getValueType() == OpenMPIRBuilder::Ident;
@@ -4741,10 +4701,6 @@ OpenMPIRBuilder::applyWorkshareLoopTarget(DebugLoc DL, CanonicalLoopInfo *CLI,
   // Find allocas outside the loop body region which are used inside loop
   // body
   Extractor.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
-  Extractor.findInputsOutputs(Inputs, Outputs, SinkingCands,
-    /*CollectGlobalInputs=*/true);
-
-  fixupVariable(Builder, OuterFn, Inputs, OI.EntryBB);
 
   // We need to model loop body region as the function f(cnt, loop_arg).
   // That's why we replace loop induction variable by the new counter

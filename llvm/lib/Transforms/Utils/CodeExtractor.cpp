@@ -1231,8 +1231,9 @@ static void eraseDebugIntrinsicsWithNonLocalRefs(Function &F) {
 /// Fix up the debug info in the old and new functions by pointing line
 /// locations and debug intrinsics to the new subprogram scope, and by deleting
 /// intrinsics which point to values outside of the new function.
-static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
-                                         CallInst &TheCall) {
+static void fixupDebugInfoPostExtraction(
+    Function &OldFunc, Function &NewFunc, CallInst &TheCall,
+    const SetVector<Value *> &inputs, const SmallVector<Value *> &NewValues) {
   DISubprogram *OldSP = OldFunc.getSubprogram();
   LLVMContext &Ctx = OldFunc.getContext();
 
@@ -1258,6 +1259,68 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
       OldSP->getUnit(), NewFunc.getName(), NewFunc.getName(), OldSP->getFile(),
       /*LineNo=*/0, SPType, /*ScopeLine=*/0, DINode::FlagZero, SPFlags);
   NewFunc.setSubprogram(NewSP);
+
+  DICompileUnit *CU = NewSP->getUnit();
+  Module *M = NewFunc.getParent();
+  DIBuilder DB(*M, true, CU);
+  for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
+    Value *RewriteVal = NewValues[i];
+    Value *val = inputs[i];
+    if (LoadInst *Load = dyn_cast<LoadInst>(val))
+      val = Load->getPointerOperand();
+    SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
+    SmallVector<DbgVariableRecord *, 1> DPUsers;
+    findDbgUsers(DbgUsers, val, &DPUsers);
+    llvm::DIExpression *Expr = DB.createExpression();
+    LLVMContext &Context = NewFunc.getContext();
+    if (DPUsers.empty())
+      continue;
+    if ((Triple(M->getTargetTriple())).isAMDGPU()) {
+      llvm::DIExprBuilder EB(NewFunc.getContext());
+
+      if (RewriteVal->getType()->isPointerTy()) {
+        Instruction *T = NewFunc.getEntryBlock().getTerminator();
+        unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
+        unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
+        AllocaInst *AI =
+            new AllocaInst(RewriteVal->getType(), allocaAS, nullptr, "Arg",
+                           NewFunc.getEntryBlock().getTerminator());
+        auto *AISpaceCast = new AddrSpaceCastInst(
+            AI, PointerType ::get(Context, defaultAS), "Arg.ascast", T);
+        llvm::StoreInst *Store = new StoreInst(RewriteVal, AISpaceCast, T);
+        llvm::LoadInst *Load =
+            new LoadInst(RewriteVal->getType(), AISpaceCast, "load_arg", T);
+        RewriteVal->replaceUsesWithIf(Load, [&](const llvm::Use &U) -> bool {
+          // We dont want to replace Arg from the store we created above.
+          if (const auto *SI = dyn_cast<llvm::StoreInst>(U.getUser()))
+            return SI != Store;
+          return true;
+        });
+        RewriteVal = AISpaceCast;
+        EB.append<llvm::DIOp::Arg>(0u, PointerType ::get(Context, allocaAS));
+        EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
+        EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
+      } else {
+        EB.append<llvm::DIOp::Arg>(0u, val->getType());
+        EB.append<llvm::DIOp::Deref>(val->getType());
+      }
+      Expr = EB.intoExpression();
+    }
+
+    // for (auto *DII : DbgUsers)
+    //   DII->replaceVariableLocationOp(val, RewriteVal);
+    for (auto *DVR : DPUsers) {
+      // DVR->replaceVariableLocationOp(val, RewriteVal);
+      DILocalVariable *OldVar = DVR->getVariable();
+      DILocalVariable *Var = llvm::DILocalVariable::get(
+          NewFunc.getContext(), NewSP, OldVar->getName(), OldVar->getFile(),
+          OldVar->getLine(), OldVar->getType(), i + 1, OldVar->getFlags(),
+          OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
+          OldVar->getAnnotations());
+      auto Loc = DILocation::get(NewFunc.getContext(), 0, 0, NewSP, 0);
+      DB.insertDeclare(RewriteVal, Var, Expr, Loc, &NewFunc.getEntryBlock());
+    }
+  }
 
   auto IsInvalidLocation = [&NewFunc](Value *Location) {
     // Location is invalid if it isn't a constant or an instruction, or is an
@@ -1512,9 +1575,10 @@ CodeExtractor::extractCodeRegion(const CodeExtractorAnalysisCache &CEAC,
       inputs, outputs, EntryFreq, oldFunction->getName() + "." + SuffixToUse,
       StructValues, StructTy);
   newFunction->IsNewDbgInfoFormat = oldFunction->IsNewDbgInfoFormat;
+  SmallVector<Value *> NewValues;
 
   emitFunctionBody(inputs, outputs, StructValues, newFunction, StructTy, header,
-                   SinkingCands);
+                   SinkingCands, NewValues);
 
   std::vector<Value *> Reloads;
   CallInst *TheCall = emitReplacerCall(
@@ -1524,7 +1588,8 @@ CodeExtractor::extractCodeRegion(const CodeExtractorAnalysisCache &CEAC,
   insertReplacerCall(oldFunction, header, TheCall->getParent(), outputs,
                      Reloads, ExitWeights);
 
-  fixupDebugInfoPostExtraction(*oldFunction, *newFunction, *TheCall);
+  fixupDebugInfoPostExtraction(*oldFunction, *newFunction, *TheCall, inputs,
+                               NewValues);
 
   LLVM_DEBUG(if (verifyFunction(*newFunction, &errs())) {
     newFunction->dump();
@@ -1589,7 +1654,8 @@ Type *CodeExtractor::getSwitchType() {
 void CodeExtractor::emitFunctionBody(
     const ValueSet &inputs, const ValueSet &outputs,
     const ValueSet &StructValues, Function *newFunction,
-    StructType *StructArgTy, BasicBlock *header, const ValueSet &SinkingCands) {
+    StructType *StructArgTy, BasicBlock *header, const ValueSet &SinkingCands,
+    SmallVector<Value *> &NewValues) {
   Function *oldFunction = header->getParent();
   LLVMContext &Context = oldFunction->getContext();
 
@@ -1621,7 +1687,6 @@ void CodeExtractor::emitFunctionBody(
 
   // Rewrite all users of the inputs in the extracted region to use the
   // arguments (or appropriate addressing into struct) instead.
-  SmallVector<Value *> NewValues;
   for (unsigned i = 0, e = inputs.size(), aggIdx = 0; i != e; ++i) {
     Value *RewriteVal;
     if (StructValues.contains(inputs[i])) {
@@ -1641,13 +1706,6 @@ void CodeExtractor::emitFunctionBody(
 
   moveCodeToFunction(newFunction);
 
-  auto UpdateDebugRecord = [&](auto *DR, Value *V, Value *N) {
-    for (auto Loc : DR->location_ops()) {
-      if (Loc == V)
-        DR->replaceVariableLocationOp(Loc, N);
-    }
-  };
-
   for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
     Value *RewriteVal = NewValues[i];
 
@@ -1656,43 +1714,6 @@ void CodeExtractor::emitFunctionBody(
       if (Instruction *inst = dyn_cast<Instruction>(use))
         if (Blocks.count(inst->getParent()))
           inst->replaceUsesOfWith(inputs[i], RewriteVal);
-
-    Value *val = inputs[i];
-    if (LoadInst *Load = dyn_cast<LoadInst>(val))
-      val = Load->getPointerOperand();
-    Module *M = newFunction->getParent();
-    llvm::DIExprBuilder EB(newFunction->getContext());
-    EB.append<llvm::DIOp::Arg>(0u, val->getType());
-    EB.append<llvm::DIOp::Deref>(val->getType());
-    llvm::DIExpression *Expr = EB.intoExpression();
-    for (Instruction &I : instructions(newFunction)) { // abid
-      if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
-          UpdateDebugRecord(DDI, val, RewriteVal);
-          if ((Triple(M->getTargetTriple())).isAMDGPU())
-            DDI->setExpression(Expr);
-      }
-    
-      for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
-          UpdateDebugRecord(&DVR, val, RewriteVal);
-          if ((Triple(M->getTargetTriple())).isAMDGPU())
-            DVR.setExpression(Expr);
-      }
-    } 
-    /*SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
-    SmallVector<DbgVariableRecord *, 1> DPUsers;
-    findDbgUsers(DbgUsers, val, &DPUsers);
-    for (auto *DII : DbgUsers)
-      DII->replaceVariableLocationOp(val, RewriteVal);
-    for (auto *DVR : DPUsers) {
-      DVR->replaceVariableLocationOp(val, RewriteVal);
-      DILocalVariable *OldVar = DVR->getVariable();
-      DILocalVariable *Var = llvm::DILocalVariable::get(
-          header->getContext(), OldVar->getScope(), OldVar->getName(),
-          OldVar->getFile(), OldVar->getLine(), OldVar->getType(), i + 3,
-          OldVar->getFlags(), OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
-          OldVar->getAnnotations());
-      DVR->setVariable(Var);
-    }*/
   }
 
   // Since there may be multiple exits from the original region, make the new
