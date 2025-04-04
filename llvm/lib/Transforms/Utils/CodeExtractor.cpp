@@ -1302,7 +1302,7 @@ static void fixupDebugInfoPostExtraction(
         EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
       } else {
         EB.append<llvm::DIOp::Arg>(0u, val->getType());
-        EB.append<llvm::DIOp::Deref>(val->getType());
+        //EB.append<llvm::DIOp::Deref>(val->getType());
       }
       Expr = EB.intoExpression();
     }
