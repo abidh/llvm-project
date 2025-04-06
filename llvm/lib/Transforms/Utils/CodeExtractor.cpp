@@ -1318,7 +1318,12 @@ static void fixupDebugInfoPostExtraction(
           OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
           OldVar->getAnnotations());
       auto Loc = DILocation::get(NewFunc.getContext(), 0, 0, NewSP, 0);
-      DB.insertDeclare(RewriteVal, Var, Expr, Loc, &NewFunc.getEntryBlock());
+      if (DVR->getParent()->getParent() == &NewFunc) {
+        DVR->replaceVariableLocationOp(val, RewriteVal);
+        DVR->setVariable(Var);
+        DVR->setDebugLoc(Loc);
+      } else
+        DB.insertDeclare(RewriteVal, Var, Expr, Loc, &NewFunc.getEntryBlock());
     }
   }
 
