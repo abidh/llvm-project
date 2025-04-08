@@ -1314,7 +1314,7 @@ static void fixupDebugInfoPostExtraction(
       DILocalVariable *OldVar = DVR->getVariable();
       DILocalVariable *Var = llvm::DILocalVariable::get(
           NewFunc.getContext(), NewSP, OldVar->getName(), OldVar->getFile(),
-          OldVar->getLine(), OldVar->getType(), i + 1, OldVar->getFlags(),
+          OldVar->getLine(), OldVar->getType(), 0, OldVar->getFlags(),
           OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits(),
           OldVar->getAnnotations());
       auto Loc = DILocation::get(NewFunc.getContext(), 0, 0, NewSP, 0);
@@ -1330,8 +1330,8 @@ static void fixupDebugInfoPostExtraction(
   auto IsInvalidLocation = [&NewFunc](Value *Location) {
     // Location is invalid if it isn't a constant or an instruction, or is an
     // instruction but isn't in the new function.
-    if (!Location || (!isa<Argument>(Location) && !isa<Constant>(Location) &&
-                      !isa<Instruction>(Location)))
+    if (!Location ||
+        (!isa<Constant>(Location) && !isa<Instruction>(Location)))
       return true;
     Instruction *LocationInst = dyn_cast<Instruction>(Location);
     return LocationInst && LocationInst->getFunction() != &NewFunc;
@@ -1353,16 +1353,10 @@ static void fixupDebugInfoPostExtraction(
     if (!NewVar) {
       DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
           *OldVar->getScope(), *NewSP, Ctx, Cache);
-      if (OldVar->isParameter())
-        NewVar = DIB.createParameterVariable(
-            NewScope, OldVar->getName(), OldVar->getArg(), OldVar->getFile(),
-            OldVar->getLine(), OldVar->getType(), /*AlwaysPreserve=*/false,
-            DINode::FlagZero, OldVar->getDWARFMemorySpace());
-      else
-        NewVar = DIB.createAutoVariable(
-            NewScope, OldVar->getName(), OldVar->getFile(), OldVar->getLine(),
-            OldVar->getType(), /*AlwaysPreserve=*/false, DINode::FlagZero,
-            OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits());
+      NewVar = DIB.createAutoVariable(
+          NewScope, OldVar->getName(), OldVar->getFile(), OldVar->getLine(),
+          OldVar->getType(), /*AlwaysPreserve=*/false, DINode::FlagZero,
+          OldVar->getDWARFMemorySpace(), OldVar->getAlignInBits());
     }
     return cast<DILocalVariable>(NewVar);
   };
