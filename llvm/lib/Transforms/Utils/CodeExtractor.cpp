@@ -1228,89 +1228,53 @@ static void eraseDebugIntrinsicsWithNonLocalRefs(Function &F) {
   }
 }
 
-static void fixupDebugInfoForAMDGPU(Function &NewFunc,
-                                    const SetVector<Value *> &inputs,
-                                    const SmallVector<Value *> &NewValues,
-                                    SmallVector<DIExpression *, 1> &Exprs,
-                                    SmallVector<Value *, 1> &Existing,
-                                    SmallVector<Value *, 1> &Repl) {
+static void addAllocasForVariables(Function &NewFunc,
+                                   const SetVector<Value *> &inputs,
+                                   SmallVector<Value *> &NewValues) {
   Module *M = NewFunc.getParent();
-  if (!(Triple(M->getTargetTriple())).isAMDGPU()) {
-    for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
-      llvm::DIExprBuilder EB(NewFunc.getContext());
-      Value *val = inputs[i];
-      Value *RewriteVal = NewValues[i];
-      //Exprs.push_back(EB.intoExpression());
-      Existing.push_back(val);
-      Repl.push_back(RewriteVal);
-    }
+  if (!(Triple(M->getTargetTriple())).isAMDGPU())
     return;
-  }
 
+  LLVMContext &Context = NewFunc.getContext();
   unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
   unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
   for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
-    llvm::DIExprBuilder EB(NewFunc.getContext());
-    Value *val = inputs[i];
     Value *RewriteVal = NewValues[i];
-    if (auto *A = dyn_cast<Argument>(RewriteVal)) {
-      if (RewriteVal->getNumUses() < 2)
-      continue;
-      //llvm::errs() << NewFunc.getName() << "       " << RewriteVal->getNumUses() << "\n";
-      //RewriteVal->dump();
-      //llvm::errs() << "Uses: " << RewriteVal->getNumUses() << "\n";
-      //for (auto *U: A->getUses())
-      //  U->getUser()->dump();
-      //llvm::errs() << "-------------------------------------\n";
+    // This is bit of a hack.
+    if (isa<Argument>(RewriteVal)) {
+      if (RewriteVal->getNumUses() == 1)
+        continue;
     }
 
-    //if (NewValues[i]->getNumUses() != 0) {
-      if (LoadInst *Load = dyn_cast<LoadInst>(inputs[i]))
-        val = Load->getPointerOperand();
-
-      LLVMContext &Context = NewFunc.getContext();
-
-      if (RewriteVal->getType()->isPointerTy()) {
-        Instruction *T = NewFunc.getEntryBlock().getTerminator();
-
-        AllocaInst *AI =
-            new AllocaInst(RewriteVal->getType(), allocaAS, nullptr, "Arg", T);
-        auto *AISpaceCast = new AddrSpaceCastInst(
-            AI, PointerType ::get(Context, defaultAS), "Arg.ascast", T);
-        llvm::StoreInst *Store = new StoreInst(RewriteVal, AISpaceCast, T);
-        llvm::LoadInst *Load =
-            new LoadInst(RewriteVal->getType(), AISpaceCast, "load_arg", T);
-        RewriteVal->replaceUsesWithIf(Load, [&](const llvm::Use &U) -> bool {
-          // We dont want to replace Arg from the store we created above.
-          if (const auto *SI = dyn_cast<llvm::StoreInst>(U.getUser()))
-            return SI != Store;
-          return true;
-        });
-        RewriteVal = AISpaceCast;
-        EB.append<llvm::DIOp::Arg>(0u, PointerType ::get(Context, allocaAS));
-        EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
-        EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
-      } else {
-        EB.append<llvm::DIOp::Arg>(0u, val->getType());
-      }
-    //}
-    Exprs.push_back(EB.intoExpression());
-    Existing.push_back(val);
-    Repl.push_back(RewriteVal);
+    if (RewriteVal->getType()->isPointerTy()) {
+      Instruction *T = NewFunc.getEntryBlock().getTerminator();
+      AllocaInst *AI =
+          new AllocaInst(RewriteVal->getType(), allocaAS, nullptr, "Arg", T);
+      auto *AISpaceCast = new AddrSpaceCastInst(
+          AI, PointerType ::get(Context, defaultAS), "Arg.ascast", T);
+      llvm::StoreInst *Store = new StoreInst(RewriteVal, AISpaceCast, T);
+      llvm::LoadInst *Load =
+          new LoadInst(RewriteVal->getType(), AISpaceCast, "load_arg", T);
+      RewriteVal->replaceUsesWithIf(Load, [&](const llvm::Use &U) -> bool {
+        // We dont want to replace Arg from the store we created above.
+        if (const auto *SI = dyn_cast<llvm::StoreInst>(U.getUser()))
+          return SI != Store;
+        return true;
+      });
+      NewValues[i] = AISpaceCast;
+    }
   }
 }
 
 /// Fix up the debug info in the old and new functions by pointing line
 /// locations and debug intrinsics to the new subprogram scope, and by deleting
 /// intrinsics which point to values outside of the new function.
-static void fixupDebugInfoPostExtraction(
-    Function &OldFunc, Function &NewFunc, CallInst &TheCall,
-    const SetVector<Value *> &inputs, const SmallVector<Value *> &NewValues) {
+static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
+                                         CallInst &TheCall,
+                                         const SetVector<Value *> &inputs,
+                                         SmallVector<Value *> &NewValues) {
 
-  SmallVector<DIExpression *, 1> Exprs;
-  SmallVector<Value *, 1> Existing;
-  SmallVector<Value *, 1> Repl;
-  fixupDebugInfoForAMDGPU(NewFunc, inputs, NewValues, Exprs, Existing, Repl);
+  addAllocasForVariables(NewFunc, inputs, NewValues);
   DISubprogram *OldSP = OldFunc.getSubprogram();
   LLVMContext &Ctx = OldFunc.getContext();
 
@@ -1322,9 +1286,19 @@ static void fixupDebugInfoPostExtraction(
     return;
   }
 
-  // Create a subprogram for the new function. Leave out a description of the
-  // function arguments, as the parameters don't correspond to anything at the
-  // source level.
+  LLVMContext &Context = NewFunc.getContext();
+  llvm::DIExprBuilder EB(NewFunc.getContext());
+  Module *M = NewFunc.getParent();
+  unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
+  unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
+  EB.append<llvm::DIOp::Arg>(0u, PointerType ::get(Context, allocaAS));
+  EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
+  EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
+  DIExpression *PtrExpr = EB.intoExpression();
+
+  // Create a subprogram for the new function. Leave out a description of
+  // the function arguments, as the parameters don't correspond to anything
+  // at the source level.
   assert(OldSP->getUnit() && "Missing compile unit for subprogram");
   DIBuilder DIB(*OldFunc.getParent(), /*AllowUnresolved=*/false,
                 OldSP->getUnit());
@@ -1345,22 +1319,36 @@ static void fixupDebugInfoPostExtraction(
       DIB.insertDeclare(New, DR->getVariable(), Expr, DR->getDebugLoc(),
                         &NewFunc.getEntryBlock());
   };
-  for (unsigned i = 0, e = Existing.size(); i != e; ++i) {
-    Value *RewriteVal = (Repl.size() > i) ? Repl[i] : NewValues[i];
-    Value *val = (Existing.size() > i) ? Existing[i] : inputs[i];
-    if (RewriteVal->getNumUses() == 0)
-      continue;
+  for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
+    Value *RewriteVal = NewValues[i];
+    Value *Input = inputs[i];
     SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
     SmallVector<DbgVariableRecord *, 1> DPUsers;
-    findDbgUsers(DbgUsers, val, &DPUsers);
-    if (DPUsers.empty() && DbgUsers.empty())
-      continue;
+    findDbgUsers(DbgUsers, Input, &DPUsers);
+    if (DPUsers.empty() && DbgUsers.empty()) {
+      if (Triple(M->getTargetTriple()).isAMDGPU()) {
+        if (LoadInst *Load = dyn_cast<LoadInst>(Input)) {
+          findDbgUsers(DbgUsers, Load->getPointerOperand(), &DPUsers);
+          if (!DPUsers.empty() || !DbgUsers.empty())
+            Input = Load->getPointerOperand();
+        }
+      }
+    }
 
-    DIExpression *Expr = (Exprs.size() > i) ? Exprs[i] : DIB.createExpression();
+    DIExpression *Expr = DIB.createExpression();
+    if (Triple(M->getTargetTriple()).isAMDGPU()) {
+      if (RewriteVal->getType()->isPointerTy())
+        Expr = PtrExpr;
+      else {
+        llvm::DIExprBuilder EB(NewFunc.getContext());
+        EB.append<llvm::DIOp::Arg>(0u, RewriteVal->getType());
+        Expr = EB.intoExpression();
+      }
+    }
     for (auto *DII : DbgUsers)
-      UpdateOrInsertDebugRecord(DII, val, RewriteVal, Expr);
+      UpdateOrInsertDebugRecord(DII, Input, RewriteVal, Expr);
     for (auto *DVR : DPUsers)
-      UpdateOrInsertDebugRecord(DVR, val, RewriteVal, Expr);
+      UpdateOrInsertDebugRecord(DVR, Input, RewriteVal, Expr);
   }
 
   auto IsInvalidLocation = [&NewFunc](Value *Location) {
