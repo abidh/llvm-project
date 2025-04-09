@@ -800,15 +800,7 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
       BasicBlock &ArtificialEntry = OutlinedFn->getEntryBlock();
       assert(ArtificialEntry.getUniqueSuccessor() == OI.EntryBB);
       assert(OI.EntryBB->getUniquePredecessor() == &ArtificialEntry);
-      Instruction *EBT = OI.EntryBB->getTerminator();
-      Instruction *ABT = ArtificialEntry.getTerminator();
-      if (ABT && EBT && ABT->DebugMarker) {
-        OI.EntryBB->createMarker(EBT);
-        EBT->DebugMarker->absorbDebugValues(*(ABT->DebugMarker), true);
-        /*for (DbgVariableRecord &DVR : filterDbgVars(ABT->getDbgRecordRange()))
-        { EBT->DebugMarker->insertDbgRecord(&DVR, false);
-        }*/
-      }
+      Instruction *Terminator = OI.EntryBB->getTerminator();
       // Move instructions from the to-be-deleted ArtificialEntry to the entry
       // basic block of the parallel region. CodeExtractor generates
       // instructions to unwrap the aggregate argument and may sink
@@ -821,6 +813,13 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
            It != End;) {
         Instruction &I = *It;
         It++;
+
+        // If the instruction has any debug values, we will attach them to the
+        // terminator of the entry block.
+        if (I.DebugMarker && Terminator) {
+          OI.EntryBB->createMarker(Terminator);
+          Terminator->DebugMarker->absorbDebugValues(*(I.DebugMarker), false);
+        }
 
         if (I.isTerminator())
           continue;
