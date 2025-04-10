@@ -1228,11 +1228,19 @@ static void eraseDebugIntrinsicsWithNonLocalRefs(Function &F) {
   }
 }
 
-/// Fix up the debug info in the old and new functions by pointing line
-/// locations and debug intrinsics to the new subprogram scope, and by deleting
-/// intrinsics which point to values outside of the new function.
+/// Fix up the debug info in the old and new functions. Following actions are
+/// performed.
+/// 1. If a debug record points to a value that has been replaced, update the
+/// record to use the new value.
+/// 2. If an Input value that has been replaced was used as a location of a
+/// debug record in the Parent function, then materealize a similar record in
+/// the new function.
+/// 3. Point line locations and debug intrinsics to the new subprogram scope
+/// 4. Remove intrinsics which point to values outside of the new function.
 static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
-                                         CallInst &TheCall) {
+                                         CallInst &TheCall,
+                                         const SetVector<Value *> &Inputs,
+                                         SmallVector<Value *> &NewValues) {
   DISubprogram *OldSP = OldFunc.getSubprogram();
   LLVMContext &Ctx = OldFunc.getContext();
 
@@ -1258,6 +1266,37 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
       OldSP->getUnit(), NewFunc.getName(), NewFunc.getName(), OldSP->getFile(),
       /*LineNo=*/0, SPType, /*ScopeLine=*/0, DINode::FlagZero, SPFlags);
   NewFunc.setSubprogram(NewSP);
+
+  auto UpdateOrInsertDebugRecord = [&](auto *DR, Value *Old, Value *New,
+                                       DIExpression *Expr, bool Declare) {
+    if (DR->getParent()->getParent() == &NewFunc)
+      DR->replaceVariableLocationOp(Old, New);
+    else {
+      if (Declare)
+        DIB.insertDeclare(New, DR->getVariable(), Expr, DR->getDebugLoc(),
+                          &NewFunc.getEntryBlock());
+      else
+        DIB.insertDbgValueIntrinsic(
+            New, DR->getVariable(), Expr, DR->getDebugLoc(),
+            NewFunc.getEntryBlock().getTerminator()->getIterator());
+    }
+  };
+  for (unsigned i = 0, e = Inputs.size(); i != e; ++i) {
+    Value *RewriteVal = NewValues[i];
+    Value *Input = Inputs[i];
+    SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
+    SmallVector<DbgVariableRecord *, 1> DPUsers;
+    findDbgUsers(DbgUsers, Input, &DPUsers);
+    DIExpression *Expr = DIB.createExpression();
+
+    for (auto *DVI : DbgUsers) {
+      UpdateOrInsertDebugRecord(DVI, Input, RewriteVal, Expr,
+                                isa<DbgDeclareInst>(DVI));
+    }
+    for (auto *DVR : DPUsers)
+      UpdateOrInsertDebugRecord(DVR, Input, RewriteVal, Expr,
+                                DVR->isDbgDeclare());
+  }
 
   auto IsInvalidLocation = [&NewFunc](Value *Location) {
     // Location is invalid if it isn't a constant or an instruction, or is an
@@ -1507,9 +1546,10 @@ CodeExtractor::extractCodeRegion(const CodeExtractorAnalysisCache &CEAC,
       inputs, outputs, EntryFreq, oldFunction->getName() + "." + SuffixToUse,
       StructValues, StructTy);
   newFunction->IsNewDbgInfoFormat = oldFunction->IsNewDbgInfoFormat;
+  SmallVector<Value *> NewValues;
 
   emitFunctionBody(inputs, outputs, StructValues, newFunction, StructTy, header,
-                   SinkingCands);
+                   SinkingCands, NewValues);
 
   std::vector<Value *> Reloads;
   CallInst *TheCall = emitReplacerCall(
@@ -1519,7 +1559,8 @@ CodeExtractor::extractCodeRegion(const CodeExtractorAnalysisCache &CEAC,
   insertReplacerCall(oldFunction, header, TheCall->getParent(), outputs,
                      Reloads, ExitWeights);
 
-  fixupDebugInfoPostExtraction(*oldFunction, *newFunction, *TheCall);
+  fixupDebugInfoPostExtraction(*oldFunction, *newFunction, *TheCall, inputs,
+                               NewValues);
 
   LLVM_DEBUG(if (verifyFunction(*newFunction, &errs())) {
     newFunction->dump();
@@ -1584,7 +1625,8 @@ Type *CodeExtractor::getSwitchType() {
 void CodeExtractor::emitFunctionBody(
     const ValueSet &inputs, const ValueSet &outputs,
     const ValueSet &StructValues, Function *newFunction,
-    StructType *StructArgTy, BasicBlock *header, const ValueSet &SinkingCands) {
+    StructType *StructArgTy, BasicBlock *header, const ValueSet &SinkingCands,
+    SmallVector<Value *> &NewValues) {
   Function *oldFunction = header->getParent();
   LLVMContext &Context = oldFunction->getContext();
 
@@ -1616,7 +1658,6 @@ void CodeExtractor::emitFunctionBody(
 
   // Rewrite all users of the inputs in the extracted region to use the
   // arguments (or appropriate addressing into struct) instead.
-  SmallVector<Value *> NewValues;
   for (unsigned i = 0, e = inputs.size(), aggIdx = 0; i != e; ++i) {
     Value *RewriteVal;
     if (StructValues.contains(inputs[i])) {
