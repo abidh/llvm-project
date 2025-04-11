@@ -1228,6 +1228,44 @@ static void eraseDebugIntrinsicsWithNonLocalRefs(Function &F) {
   }
 }
 
+static void addAllocasForVariables(Function &NewFunc,
+                                   const SetVector<Value *> &inputs,
+                                   SmallVector<Value *> &NewValues) {
+  Module *M = NewFunc.getParent();
+  if (!(Triple(M->getTargetTriple())).isAMDGPU())
+    return;
+
+  LLVMContext &Context = NewFunc.getContext();
+  unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
+  unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
+  for (unsigned i = 0, e = inputs.size(); i != e; ++i) {
+    Value *RewriteVal = NewValues[i];
+    // This is bit of a hack.
+    if (isa<Argument>(RewriteVal)) {
+      if (RewriteVal->getNumUses() == 1)
+        continue;
+    }
+
+    if (RewriteVal->getType()->isPointerTy()) {
+      Instruction *T = NewFunc.getEntryBlock().getTerminator();
+      AllocaInst *AI =
+          new AllocaInst(RewriteVal->getType(), allocaAS, nullptr, "Arg", T);
+      auto *AISpaceCast = new AddrSpaceCastInst(
+          AI, PointerType ::get(Context, defaultAS), "Arg.ascast", T);
+      llvm::StoreInst *Store = new StoreInst(RewriteVal, AISpaceCast, T);
+      llvm::LoadInst *Load =
+          new LoadInst(RewriteVal->getType(), AISpaceCast, "load_arg", T);
+      RewriteVal->replaceUsesWithIf(Load, [&](const llvm::Use &U) -> bool {
+        // We dont want to replace Arg from the store we created above.
+        if (const auto *SI = dyn_cast<llvm::StoreInst>(U.getUser()))
+          return SI != Store;
+        return true;
+      });
+      NewValues[i] = AISpaceCast;
+    }
+  }
+}
+
 /// Fix up the debug info in the old and new functions. Following actions are
 /// performed.
 /// 1. If a debug record points to a value that has been replaced, update the
@@ -1241,6 +1279,7 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
                                          CallInst &TheCall,
                                          const SetVector<Value *> &Inputs,
                                          SmallVector<Value *> &NewValues) {
+  addAllocasForVariables(NewFunc, Inputs, NewValues);
   DISubprogram *OldSP = OldFunc.getSubprogram();
   LLVMContext &Ctx = OldFunc.getContext();
 
@@ -1281,13 +1320,39 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
             NewFunc.getEntryBlock().getTerminator()->getIterator());
     }
   };
+  LLVMContext &Context = NewFunc.getContext();
+  Module *M = NewFunc.getParent();
   for (unsigned i = 0, e = Inputs.size(); i != e; ++i) {
     Value *RewriteVal = NewValues[i];
     Value *Input = Inputs[i];
     SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
     SmallVector<DbgVariableRecord *, 1> DPUsers;
     findDbgUsers(DbgUsers, Input, &DPUsers);
+    if (DPUsers.empty() && DbgUsers.empty()) {
+      if (Triple(M->getTargetTriple()).isAMDGPU()) {
+        if (LoadInst *Load = dyn_cast<LoadInst>(Input)) {
+          findDbgUsers(DbgUsers, Load->getPointerOperand(), &DPUsers);
+          if (!DPUsers.empty() || !DbgUsers.empty())
+            Input = Load->getPointerOperand();
+        }
+      }
+    }
     DIExpression *Expr = DIB.createExpression();
+    if (Triple(M->getTargetTriple()).isAMDGPU()) {
+      if (RewriteVal->getType()->isPointerTy()) {
+        unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
+        unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
+        llvm::DIExprBuilder EB(Context);
+        EB.append<llvm::DIOp::Arg>(0u, PointerType ::get(Context, allocaAS));
+        EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
+        EB.append<llvm::DIOp::Deref>(PointerType ::get(Context, defaultAS));
+        Expr = EB.intoExpression();
+      } else {
+        llvm::DIExprBuilder EB(NewFunc.getContext());
+        EB.append<llvm::DIOp::Arg>(0u, RewriteVal->getType());
+        Expr = EB.intoExpression();
+      }
+    }
 
     for (auto *DVI : DbgUsers) {
       UpdateOrInsertDebugRecord(DVI, Input, RewriteVal, Expr,
