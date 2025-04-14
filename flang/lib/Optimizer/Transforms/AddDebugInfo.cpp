@@ -476,6 +476,24 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
       fullName, funcFileAttr, line, line, subprogramFlags, subTypeAttr,
       /*retainedNodes=*/{}, /*annotations=*/{});
 
+  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
+    mlir::DistinctAttr Id1 =
+        mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    mlir::DistinctAttr Id2 =
+        mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    unsigned line = getLineFromLoc(targetOp.getLoc());
+    llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
+    types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
+    mlir::LLVM::DISubroutineTypeAttr spTy =
+        mlir::LLVM::DISubroutineTypeAttr::get(context, CC, types);
+    mlir::LLVM::DISubprogramFlags flags = subprogramFlags;
+    auto spAttr = mlir::LLVM::DISubprogramAttr::get(
+        context, Id1, /*isRecSelf=*/false, Id2, compilationUnit, Scope,
+        mlir::StringAttr::get(context, "__omp_offload_expr__"),
+        mlir::StringAttr::get(context, "__omp_offload_expr__"), funcFileAttr,
+        line, line, flags, spTy, {}, /*annotations=*/{});
+    targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, spAttr));
+  });
   // There is no direct information in the IR for any 'use' statement in the
   // function. We have to extract that information from the DeclareOp. We do
   // a pass on the DeclareOp and generate ModuleAttr and corresponding
@@ -511,7 +529,15 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
-    handleDeclareOp(declOp, fileAttr, spAttr, typeGen, symbolTable);
+    mlir::LLVM::DISubprogramAttr spTy = spAttr;
+    if (auto tOp = declOp->getParentOfType<mlir::omp::TargetOp>()) {
+      if (auto fusedLoc = llvm::dyn_cast<mlir::FusedLoc>(tOp.getLoc())) {
+        if (auto sp = llvm::dyn_cast<mlir::LLVM::DISubprogramAttr>(
+                fusedLoc.getMetadata()))
+          spTy = sp;
+      }
+    }
+    handleDeclareOp(declOp, fileAttr, spTy, typeGen, symbolTable);
   });
   // commonBlockMap ensures that we don't create multiple DICommonBlockAttr of
   // the same name in one function. But it is ok (rather required) to create

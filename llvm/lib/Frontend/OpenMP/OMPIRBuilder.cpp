@@ -6965,7 +6965,7 @@ static Expected<Function *> createOutlinedFunction(
   IRBuilder<>::InsertPointGuard IPG(Builder);
   // If there's a DISubprogram associated with current function, then
   // generate one for the outlined function.
-  if (Function *ParentFunc = BB->getParent()) {
+  /*if (Function *ParentFunc = BB->getParent()) {
     if (DISubprogram *SP = ParentFunc->getSubprogram()) {
       DICompileUnit *CU = SP->getUnit();
       DIBuilder DB(*M, true, CU);
@@ -6992,9 +6992,10 @@ static Expected<Function *> createOutlinedFunction(
                             OutlinedSP, DL.getInlinedAt()));
       }
     }
-  }
+  }*/
 
   // Generate the region into the function.
+  Builder.SetCurrentDebugLocation(llvm::DebugLoc());
   BasicBlock *EntryBB = BasicBlock::Create(Builder.getContext(), "entry", Func);
   Builder.SetInsertPoint(EntryBB);
 
