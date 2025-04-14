@@ -5150,6 +5150,18 @@ static LogicalResult
 convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
   auto targetOp = cast<omp::TargetOp>(opInst);
+  /*auto spLoc =
+  targetOp.getLoc()->findInstanceOf<FusedLocWith<LLVM::DISubprogramAttr>>();
+  llvm::DISubprogram *subprogram = nullptr;
+  if (spLoc) {
+    if (auto *DIsp =
+  llvm::dyn_cast<llvm::DISubprogram>(moduleTranslation.translateDebugInfo(spLoc.getMetadata())))
+      subprogram = DIsp;
+  }*/
+  llvm::DebugLoc DL = builder.getCurrentDebugLocation();
+  llvm::DISubprogram *subprogram = DL.get()->getScope()->getSubprogram();
+  llvm::DebugLoc DL1 = builder.GetInsertBlock()->back().getDebugLoc();
+  builder.SetCurrentDebugLocation(DL1);
   if (failed(checkImplementationStatus(opInst)))
     return failure();
 
@@ -5239,11 +5251,13 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       -> llvm::OpenMPIRBuilder::InsertPointOrErrorTy {
     llvm::IRBuilderBase::InsertPointGuard guard(builder);
     builder.SetCurrentDebugLocation(llvm::DebugLoc());
+
     // Forward target-cpu and target-features function attributes from the
     // original function to the new outlined function.
     llvm::Function *llvmParentFn =
         moduleTranslation.lookupFunction(parentFn.getName());
     llvmOutlinedFn = codeGenIP.getBlock()->getParent();
+    llvmOutlinedFn->setSubprogram(subprogram);
     assert(llvmParentFn && llvmOutlinedFn &&
            "Both parent and outlined functions must exist at this point");
 
@@ -5399,7 +5413,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
-  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
 
   llvm::OpenMPIRBuilder::TargetDataInfo info(
       /*RequiresDevicePointerInfo=*/false,
@@ -5418,12 +5431,20 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   if (Value targetIfCond = targetOp.getIfExpr())
     ifCond = moduleTranslation.lookupValue(targetIfCond);
 
+  /*llvm::DebugLoc DL = builder.getCurrentDebugLocation();
+  llvm::Function *llvmParentFn =
+  moduleTranslation.lookupFunction(parentFn.getName());
+  builder.SetCurrentDebugLocation(
+    llvm::DILocation::get(moduleTranslation.getLLVMModule()->getContext(),
+  DL.getLine(), DL.getCol(), subprogram, DL.getInlinedAt()));*/
+  // builder.SetCurrentDebugLocation(DL);
+  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
   llvm::OpenMPIRBuilder::InsertPointOrErrorTy afterIP =
       moduleTranslation.getOpenMPBuilder()->createTarget(
           ompLoc, isOffloadEntry, allocaIP, builder.saveIP(), info, entryInfo,
           defaultAttrs, runtimeAttrs, ifCond, kernelInput, genMapInfoCB, bodyCB,
           argAccessorCB, customMapperCB, dds, targetOp.getNowait());
-
+  // builder.SetCurrentDebugLocation(DL);
   if (failed(handleError(afterIP, opInst)))
     return failure();
 
