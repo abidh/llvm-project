@@ -1367,8 +1367,10 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
     // Location is invalid if it isn't a constant or an instruction, or is an
     // instruction but isn't in the new function.
     if (!Location ||
-        (!isa<Constant>(Location) && !isa<Instruction>(Location)))
+        (!isa<Constant>(Location) && !isa<Argument>(Location) && !isa<Instruction>(Location)))
       return true;
+    if (Argument *A = dyn_cast<Argument>(Location))
+      return A->getParent() != &NewFunc;
     Instruction *LocationInst = dyn_cast<Instruction>(Location);
     return LocationInst && LocationInst->getFunction() != &NewFunc;
   };
