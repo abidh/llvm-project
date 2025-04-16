@@ -50,7 +50,11 @@ module attributes {dlti.dl_spec = #dlti.dl_spec<#dlti.dl_entry<"dlti.alloca_memo
 // CHECK: define internal void @[[LOOP_BODY_FN]](i32 %[[LOOP_CNT:.*]], ptr %[[LOOP_BODY_ARG:.*]])
 // CHECK:   %[[GEP2:.*]] = getelementptr { ptr }, ptr %[[LOOP_BODY_ARG]], i32 0, i32 0
 // CHECK:   %[[LOADGEP:.*]] = load ptr, ptr %[[GEP2]], align 8
-// CHECK:   %[[GEP3:.*]] = getelementptr [10 x i32], ptr %[[LOADGEP]], i32 0, i32 %[[TMP2:.*]]
+// CHECK:   %[[ALLOC:.*]] = alloca ptr
+// CHECK:   %[[ASC:.*]] = addrspacecast ptr addrspace(5) %[[ALLOC]] to ptr
+// CHECK:   store ptr %[[LOADGEP]], ptr %[[ASC]]
+// CHECK:   %[[LOAD1:.*]] = load ptr, ptr %[[ASC]]
+// CHECK:   %[[GEP3:.*]] = getelementptr [10 x i32], ptr %[[LOAD1]], i32 0, i32 %[[TMP2:.*]]
 // CHECK:   store i32 %[[VAL0:.*]], ptr %[[GEP3]], align 4
 
 // CHECK: define void @[[FUNC_EMPTY_WSLOOP:.*]]()
