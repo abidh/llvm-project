@@ -1248,20 +1248,21 @@ static void addAllocasForVariables(Function &NewFunc,
 
     if (RewriteVal->getType()->isPointerTy()) {
       Instruction *T = NewFunc.getEntryBlock().getTerminator();
-      AllocaInst *AI =
+      Instruction *Addr =
           new AllocaInst(RewriteVal->getType(), allocaAS, nullptr, "Arg", T);
-      auto *AISpaceCast = new AddrSpaceCastInst(
-          AI, PointerType ::get(Context, defaultAS), "Arg.ascast", T);
-      llvm::StoreInst *Store = new StoreInst(RewriteVal, AISpaceCast, T);
+      if (allocaAS !=  defaultAS)    
+        Addr = new AddrSpaceCastInst(
+          Addr, PointerType ::get(Context, defaultAS), "Arg.ascast", T);
+      llvm::StoreInst *Store = new StoreInst(RewriteVal, Addr, T);
       llvm::LoadInst *Load =
-          new LoadInst(RewriteVal->getType(), AISpaceCast, "load_arg", T);
+          new LoadInst(RewriteVal->getType(), Addr, "load_arg", T);
       RewriteVal->replaceUsesWithIf(Load, [&](const llvm::Use &U) -> bool {
         // We dont want to replace Arg from the store we created above.
         if (const auto *SI = dyn_cast<llvm::StoreInst>(U.getUser()))
           return SI != Store;
         return true;
       });
-      NewValues[i] = AISpaceCast;
+      NewValues[i] = Addr;
     }
   }
 }
