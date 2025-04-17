@@ -6858,19 +6858,16 @@ static void FixupDebugInfoForOutlinedFunction(
   SmallDenseMap<DILocalVariable *, DILocalVariable *> RemappedVariables;
 
   auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, unsigned arg) {
-    auto NewSP = Func->getSubprogram();
     DILocalVariable *&NewVar = RemappedVariables[OldVar];
     // Only use cached variable if the arg number matches. This is important
     // so that DIVariable created for privatized variables are not discarded.
     if (NewVar && (arg == NewVar->getArg()))
       return NewVar;
 
-    DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
-        *OldVar->getScope(), *NewSP, Builder.getContext(), Cache);
     NewVar = llvm::DILocalVariable::get(
-        Builder.getContext(), NewScope, OldVar->getName(), OldVar->getFile(),
-        OldVar->getLine(), OldVar->getType(), arg, OldVar->getFlags(),
-        OldVar->getAlignInBits(), OldVar->getAnnotations());
+        Builder.getContext(), OldVar->getScope(), OldVar->getName(),
+        OldVar->getFile(), OldVar->getLine(), OldVar->getType(), arg,
+        OldVar->getFlags(), OldVar->getAlignInBits(), OldVar->getAnnotations());
     return NewVar;
   };
 
@@ -6881,10 +6878,10 @@ static void FixupDebugInfoForOutlinedFunction(
       auto Iter = ValueReplacementMap.find(Loc);
       if (Iter != ValueReplacementMap.end()) {
         DR->replaceVariableLocationOp(Loc, std::get<0>(Iter->second));
-        //ArgNo = std::get<1>(Iter->second) + 1;
+        ArgNo = std::get<1>(Iter->second) + 1;
       }
     }
-    //DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
+    DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
   };
 
   // The location and scope of variable intrinsics and records still point to
@@ -7086,8 +7083,8 @@ static Expected<Function *> createOutlinedFunction(
   for (auto Deferred : DeferredReplacement)
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred), Func);
 
-  //FixupDebugInfoForOutlinedFunction(OMPBuilder, Builder, Func,
-  //                                  ValueReplacementMap);
+  FixupDebugInfoForOutlinedFunction(OMPBuilder, Builder, Func,
+                                    ValueReplacementMap);
   return Func;
 }
 
