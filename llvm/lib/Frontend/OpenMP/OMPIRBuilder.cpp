@@ -6881,10 +6881,10 @@ static void FixupDebugInfoForOutlinedFunction(
       auto Iter = ValueReplacementMap.find(Loc);
       if (Iter != ValueReplacementMap.end()) {
         DR->replaceVariableLocationOp(Loc, std::get<0>(Iter->second));
-        ArgNo = std::get<1>(Iter->second) + 1;
+        //ArgNo = std::get<1>(Iter->second) + 1;
       }
     }
-    DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
+    //DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
   };
 
   // The location and scope of variable intrinsics and records still point to
@@ -7086,8 +7086,8 @@ static Expected<Function *> createOutlinedFunction(
   for (auto Deferred : DeferredReplacement)
     ReplaceValue(std::get<0>(Deferred), std::get<1>(Deferred), Func);
 
-  FixupDebugInfoForOutlinedFunction(OMPBuilder, Builder, Func,
-                                    ValueReplacementMap);
+  //FixupDebugInfoForOutlinedFunction(OMPBuilder, Builder, Func,
+  //                                  ValueReplacementMap);
   return Func;
 }
 
