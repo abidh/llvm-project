@@ -4929,14 +4929,6 @@ static LogicalResult
 convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
   auto targetOp = cast<omp::TargetOp>(opInst);
-  /*auto spLoc =
-  targetOp.getLoc()->findInstanceOf<FusedLocWith<LLVM::DISubprogramAttr>>();
-  llvm::DISubprogram *subprogram = nullptr;
-  if (spLoc) {
-    if (auto *DIsp =
-  llvm::dyn_cast<llvm::DISubprogram>(moduleTranslation.translateDebugInfo(spLoc.getMetadata())))
-      subprogram = DIsp;
-  }*/
   llvm::DebugLoc DL = builder.getCurrentDebugLocation();
   llvm::DISubprogram *subprogram = DL.get()->getScope()->getSubprogram();
   llvm::DebugLoc DL1 = builder.GetInsertBlock()->back().getDebugLoc();
@@ -5190,6 +5182,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
+  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
 
   llvm::OpenMPIRBuilder::TargetDataInfo info(
       /*RequiresDevicePointerInfo=*/false,
@@ -5208,14 +5201,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   if (Value targetIfCond = targetOp.getIfExpr())
     ifCond = moduleTranslation.lookupValue(targetIfCond);
 
-  /*llvm::DebugLoc DL = builder.getCurrentDebugLocation();
-  llvm::Function *llvmParentFn =
-  moduleTranslation.lookupFunction(parentFn.getName());
-  builder.SetCurrentDebugLocation(
-    llvm::DILocation::get(moduleTranslation.getLLVMModule()->getContext(),
-  DL.getLine(), DL.getCol(), subprogram, DL.getInlinedAt()));*/
-  // builder.SetCurrentDebugLocation(DL);
-  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
   llvm::OpenMPIRBuilder::InsertPointOrErrorTy afterIP =
       moduleTranslation.getOpenMPBuilder()->createTarget(
           ompLoc, isOffloadEntry, allocaIP, builder.saveIP(), info, entryInfo,
