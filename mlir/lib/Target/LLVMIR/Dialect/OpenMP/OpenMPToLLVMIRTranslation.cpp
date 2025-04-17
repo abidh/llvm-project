@@ -5021,7 +5021,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       -> llvm::OpenMPIRBuilder::InsertPointOrErrorTy {
     llvm::IRBuilderBase::InsertPointGuard guard(builder);
     builder.SetCurrentDebugLocation(llvm::DebugLoc());
-
     // Forward target-cpu and target-features function attributes from the
     // original function to the new outlined function.
     llvm::Function *llvmParentFn =
@@ -5206,7 +5205,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
           ompLoc, isOffloadEntry, allocaIP, builder.saveIP(), info, entryInfo,
           defaultAttrs, runtimeAttrs, ifCond, kernelInput, genMapInfoCB, bodyCB,
           argAccessorCB, customMapperCB, dds, targetOp.getNowait());
-  // builder.SetCurrentDebugLocation(DL);
+
   if (failed(handleError(afterIP, opInst)))
     return failure();
 
