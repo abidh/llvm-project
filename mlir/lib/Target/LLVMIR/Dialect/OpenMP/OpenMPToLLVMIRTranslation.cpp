@@ -4929,10 +4929,10 @@ static LogicalResult
 convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
   auto targetOp = cast<omp::TargetOp>(opInst);
-  llvm::DebugLoc DL = builder.getCurrentDebugLocation();
-  llvm::DISubprogram *subprogram = DL.get()->getScope()->getSubprogram();
-  llvm::DebugLoc DL1 = builder.GetInsertBlock()->back().getDebugLoc();
-  builder.SetCurrentDebugLocation(DL1);
+  llvm::DebugLoc OutlinedFnLoc = builder.getCurrentDebugLocation();
+  llvm::BasicBlock *parentBB = builder.GetInsertBlock();
+  if (parentBB && !parentBB->empty())
+    builder.SetCurrentDebugLocation(parentBB->back().getDebugLoc());
   if (failed(checkImplementationStatus(opInst)))
     return failure();
 
@@ -5026,9 +5026,11 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     llvm::Function *llvmParentFn =
         moduleTranslation.lookupFunction(parentFn.getName());
     llvmOutlinedFn = codeGenIP.getBlock()->getParent();
-    llvmOutlinedFn->setSubprogram(subprogram);
     assert(llvmParentFn && llvmOutlinedFn &&
            "Both parent and outlined functions must exist at this point");
+
+    if (OutlinedFnLoc && llvmParentFn->getSubprogram())
+      llvmOutlinedFn->setSubprogram(OutlinedFnLoc->getScope()->getSubprogram());
 
     if (auto attr = llvmParentFn->getFnAttribute("target-cpu");
         attr.isStringAttribute())
