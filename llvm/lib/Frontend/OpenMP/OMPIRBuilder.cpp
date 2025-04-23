@@ -6960,8 +6960,8 @@ static Expected<Function *> createOutlinedFunction(
 
   // Save insert point.
   IRBuilder<>::InsertPointGuard IPG(Builder);
-  // Our debug location may still be pointing to parent function but we are
-  // generating entries into new function now. Reset it.
+  // We will generate the entries in the outlined function but the debug
+  // location may still be pointing to the parent function. Reset it now.
   Builder.SetCurrentDebugLocation(llvm::DebugLoc());
 
   // Generate the region into the function.
