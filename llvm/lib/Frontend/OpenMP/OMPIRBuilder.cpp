@@ -6848,40 +6848,18 @@ FunctionCallee OpenMPIRBuilder::createDispatchDeinitFunction() {
 
 static void FixupDebugInfoForOutlinedFunction(
     OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder, Function *Func,
-    DenseMap<Value *, std::tuple<Value *, unsigned>> &ValueReplacementMap) {
+    DenseMap<Value *, Value *> &ValueReplacementMap) {
 
   DISubprogram *NewSP = Func->getSubprogram();
   if (!NewSP)
     return;
 
-  DenseMap<const MDNode *, MDNode *> Cache;
-  SmallDenseMap<DILocalVariable *, DILocalVariable *> RemappedVariables;
-
-  auto GetUpdatedDIVariable = [&](DILocalVariable *OldVar, unsigned arg) {
-    DILocalVariable *&NewVar = RemappedVariables[OldVar];
-    // Only use cached variable if the arg number matches. This is important
-    // so that DIVariable created for privatized variables are not discarded.
-    if (NewVar && (arg == NewVar->getArg()))
-      return NewVar;
-
-    NewVar = llvm::DILocalVariable::get(
-        Builder.getContext(), OldVar->getScope(), OldVar->getName(),
-        OldVar->getFile(), OldVar->getLine(), OldVar->getType(), arg,
-        OldVar->getFlags(), OldVar->getAlignInBits(), OldVar->getAnnotations());
-    return NewVar;
-  };
-
   auto UpdateDebugRecord = [&](auto *DR) {
-    DILocalVariable *OldVar = DR->getVariable();
-    unsigned ArgNo = 0;
     for (auto Loc : DR->location_ops()) {
       auto Iter = ValueReplacementMap.find(Loc);
-      if (Iter != ValueReplacementMap.end()) {
-        DR->replaceVariableLocationOp(Loc, std::get<0>(Iter->second));
-        ArgNo = std::get<1>(Iter->second) + 1;
-      }
+      if (Iter != ValueReplacementMap.end())
+        DR->replaceVariableLocationOp(Loc, Iter->second);
     }
-    //DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
   };
 
   // The location and scope of variable intrinsics and records still point to
@@ -7007,7 +6985,7 @@ static Expected<Function *> createOutlinedFunction(
           ? make_range(Func->arg_begin() + 1, Func->arg_end())
           : Func->args();
 
-  DenseMap<Value *, std::tuple<Value *, unsigned>> ValueReplacementMap;
+  DenseMap<Value *, Value *> ValueReplacementMap;
 
   auto ReplaceValue = [](Value *Input, Value *InputCopy, Function *Func) {
     // Things like GEP's can come in the form of Constants. Constants and
@@ -7050,7 +7028,7 @@ static Expected<Function *> createOutlinedFunction(
     if (!AfterIP)
       return AfterIP.takeError();
     Builder.restoreIP(*AfterIP);
-    ValueReplacementMap[Input] = std::make_tuple(InputCopy, Arg.getArgNo());
+    ValueReplacementMap[Input] = InputCopy;
 
     // In certain cases a Global may be set up for replacement, however, this
     // Global may be used in multiple arguments to the kernel, just segmented
