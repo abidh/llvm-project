@@ -20,7 +20,7 @@
 #sp = #llvm.di_subprogram<id = distinct[2]<>, compileUnit = #cu, scope = #file,
   name = "test", file = #file, subprogramFlags = "Definition", type = #sp_ty>
 #sp1 = #llvm.di_subprogram<id = distinct[3]<>, compileUnit = #cu, scope = #file,
-  name = "__omp", file = #file, subprogramFlags = "Definition", type = #sp_ty>
+  name = "target", file = #file, subprogramFlags = "Definition", type = #sp_ty>
 #var_arr = #llvm.di_local_variable<scope = #sp1,
   name = "arr", file = #file, line = 4, type = #array_ty>
 #var_i = #llvm.di_local_variable<scope = #sp1,
@@ -59,7 +59,7 @@ module attributes {omp.is_target_device = false} {
 #loc4 = loc(fused<#g_var>[#loc1])
 #loc5 = loc(fused<#sp1>[#loc2])
 
-// CHECK: ![[SP:[0-9]+]] = distinct !DISubprogram(name: "__omp{{.*}})
+// CHECK: ![[SP:[0-9]+]] = distinct !DISubprogram(name: "target"{{.*}})
 // CHECK: !DILocalVariable(name: "x", arg: 1, scope: ![[SP]]{{.*}})
 // CHECK: !DILocalVariable(name: "arr", arg: 2, scope: ![[SP]]{{.*}})
 // CHECK: !DILocalVariable(name: "i", arg: 3, scope: ![[SP]]{{.*}})

@@ -21,11 +21,11 @@ module attributes {llvm.target_triple = "amdgcn-amd-amdhsa", omp.is_target_devic
 #sp = #llvm.di_subprogram<id = distinct[1]<>, compileUnit = #cu, scope = #file,
  name = "_QQmain", file = #file, subprogramFlags = "Definition", type = #sp_ty>
 #sp1 = #llvm.di_subprogram<id = distinct[2]<>, compileUnit = #cu, scope = #file,
- name = "__omp", file = #file, subprogramFlags = "Definition", type = #sp_ty>
+ name = "target", file = #file, subprogramFlags = "Definition", type = #sp_ty>
 #loc1 = loc("target.f90":1:1)
 #loc2 = loc("target.f90":46:3)
 #loc3 = loc(fused<#sp>[#loc1])
 #loc4 = loc(fused<#sp1>[#loc1])
 
-// CHECK-DAG: ![[SP:.*]] = {{.*}}!DISubprogram(name: "__omp{{.*}}"{{.*}})
+// CHECK-DAG: ![[SP:.*]] = {{.*}}!DISubprogram(name: "target"{{.*}})
 // CHECK-DAG: !DILocation(line: 46, column: 3, scope: ![[SP]])
