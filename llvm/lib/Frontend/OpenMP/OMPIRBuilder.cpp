@@ -6881,7 +6881,7 @@ static void FixupDebugInfoForOutlinedFunction(
         ArgNo = std::get<1>(Iter->second) + 1;
       }
     }
-    DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
+    //DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
   };
 
   // The location and scope of variable intrinsics and records still point to
