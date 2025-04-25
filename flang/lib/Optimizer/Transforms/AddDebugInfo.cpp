@@ -206,8 +206,10 @@ void AddDebugInfoPass::handleDeclareOp(fir::cg::XDeclareOp declOp,
   // a dummy_scope operand).
   unsigned argNo = 0;
   if (auto tOp = declOp->getParentOfType<mlir::omp::TargetOp>()) {
-    if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(declOp.getMemref()))
-      argNo = arg.getArgNumber() + 1;
+    if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(declOp.getMemref())) {
+      if (arg.getOwner() == &(tOp.getRegion().front()))
+        argNo = arg.getArgNumber() + 1;
+    }
   }
   else if (declOp.getDummyScope()) {
     if (auto arg = llvm::dyn_cast<mlir::BlockArgument>(declOp.getMemref())) {
