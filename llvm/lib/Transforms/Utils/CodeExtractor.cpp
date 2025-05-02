@@ -1240,6 +1240,33 @@ static void eraseDebugIntrinsicsWithNonLocalRefs(Function &F) {
   }
 }
 
+static Value *addAllocasForInputValue(Function &Func, Value *Val) {
+  Module *M = Func.getParent();
+  LLVMContext &Context = Func.getContext();
+  unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
+  unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
+
+  if (Val->getType()->isPointerTy()) {
+    Instruction *T = Func.getEntryBlock().getTerminator();
+    Instruction *Addr =
+        new AllocaInst(Val->getType(), allocaAS, nullptr, "Arg", T);
+    if (allocaAS != defaultAS)
+      Addr = new AddrSpaceCastInst(Addr, PointerType ::get(Context, defaultAS),
+                                   "Arg.ascast", T);
+    llvm::StoreInst *Store = new StoreInst(Val, Addr, T);
+    llvm::LoadInst *Load =
+        new LoadInst(Val->getType(), Addr, "load_arg", T);
+    Val->replaceUsesWithIf(Load, [&](const llvm::Use &U) -> bool {
+      // We dont want to replace Arg from the store we created above.
+      if (const auto *SI = dyn_cast<llvm::StoreInst>(U.getUser()))
+        return SI != Store;
+      return true;
+    });
+    return Addr;
+  }
+  return Val;
+}
+
 /// Fix up the debug info in the old and new functions. Following changes are
 /// done.
 /// 1. If a debug record points to a value that has been replaced, update the
@@ -1294,11 +1321,53 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
         NewLoc, DR->getVariable(), Expr, DR->getDebugLoc(),
         NewFunc.getEntryBlock().getTerminator()->getIterator());
   };
-  for (auto [Input, NewVal] : zip_equal(Inputs, NewValues)) {
+
+  Module *M = NewFunc.getParent();
+  for (auto [In, Repl] : zip_equal(Inputs, NewValues)) {
+    Value *Input = In;
+    Value *NewVal = Repl;
     SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
     SmallVector<DbgVariableRecord *, 1> DPUsers;
     findDbgUsers(DbgUsers, Input, &DPUsers);
     DIExpression *Expr = DIB.createExpression();
+
+    if (Triple(M->getTargetTriple()).isAMDGPU()) {
+      NewVal = addAllocasForInputValue(NewFunc, NewVal);
+      // When we were fixing up the debug infor for the target region in
+      // FixupDebugInfoForOutlinedFunction, we change the location in the
+      // debug information a bit. If you look at the following snippet, the
+      // debug location is changed from %8 to %4.
+      // %3 = alloca ptr, align 8, addrspace(5), !dbg !26
+      // %4 = addrspacecast ptr addrspace(5) %3 to ptr, !dbg !26
+      // store ptr %1, ptr %4, align 8, !dbg !26
+      // %8 = load ptr, ptr %4, align 8
+      // So if our input was load, we will also use its address to look for
+      // debug records.
+      if (DPUsers.empty() && DbgUsers.empty()) {
+        if (LoadInst *Load = dyn_cast<LoadInst>(Input)) {
+          if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Load->getPointerOperand())) {
+            findDbgUsers(DbgUsers, ASc, &DPUsers);
+            if (!DPUsers.empty() || !DbgUsers.empty())
+              Input = Load->getPointerOperand();
+          }
+        }
+      }
+      if (DPUsers.empty() && DbgUsers.empty())
+        continue;
+      if (NewVal->getType()->isPointerTy()) {
+        unsigned int allocaAS = M->getDataLayout().getAllocaAddrSpace();
+        unsigned int defaultAS = M->getDataLayout().getProgramAddressSpace();
+        llvm::DIExprBuilder EB(Ctx);
+        EB.append<llvm::DIOp::Arg>(0u, PointerType ::get(Ctx, allocaAS));
+        EB.append<llvm::DIOp::Deref>(PointerType ::get(Ctx, defaultAS));
+        EB.append<llvm::DIOp::Deref>(PointerType ::get(Ctx, defaultAS));
+        Expr = EB.intoExpression();
+      } else {
+        llvm::DIExprBuilder EB(Ctx);
+        EB.append<llvm::DIOp::Arg>(0u, NewVal->getType());
+        Expr = EB.intoExpression();
+      }
+    }
 
     // Iterate the debud users of the Input values. If they are in the extracted
     // function then update their location with the new value. If they are in
