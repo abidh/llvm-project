@@ -2429,7 +2429,7 @@ static const DIExpression *computeExprForSpill(
   if (MI.isIndirectDebugValue()) {
     assert(MI.getDebugOffset().getImm() == 0 &&
            "DBG_VALUE with nonzero offset");
-    Expr = DIExpression::prepend(Expr, DIExpression::DerefBefore);
+    //Expr = DIExpression::prepend(Expr, DIExpression::DerefBefore);
   } else if (MI.isDebugValueList()) {
     // We will replace the spilled register with a frame index, so
     // immediately deref all references to the spilled register.

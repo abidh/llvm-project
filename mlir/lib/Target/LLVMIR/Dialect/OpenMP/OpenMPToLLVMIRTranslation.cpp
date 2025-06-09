@@ -5808,7 +5808,7 @@ static void updateDebugInfoForDeclareTargetFunctions(
     if (DR->getNumVariableLocationOps() != 1u)
       return;
     auto Loc = DR->getVariableLocationOp(0u);
-    if (!isa<llvm::AllocaInst>(Loc->stripPointerCasts()))
+    /*if (!isa<llvm::AllocaInst>(Loc->stripPointerCasts()))
       return;
     llvm::AllocaInst *AI = cast<llvm::AllocaInst>(Loc->stripPointerCasts());
     DR->replaceVariableLocationOp(0u, AI);
@@ -5816,6 +5816,19 @@ static void updateDebugInfoForDeclareTargetFunctions(
     EB.append<llvm::DIOp::Arg>(0u, AI->getType());
     EB.append<llvm::DIOp::Deref>(AI->getAllocatedType());
     DR->setExpression(EB.intoExpression());
+    */
+      if (auto AI = dyn_cast<llvm::AllocaInst>(Loc->stripPointerCasts())) {
+        DR->replaceVariableLocationOp(0u, AI);
+        llvm::DIExprBuilder ExprBuilder(Fn->getContext());
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, AI->getType());
+        ExprBuilder.append<llvm::DIOp::Deref>(AI->getAllocatedType());
+        DR->setExpression(ExprBuilder.intoExpression());
+      } else if (Loc->getType()->isPointerTy()) {
+        llvm::DIExprBuilder ExprBuilder(Fn->getContext());
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
+        ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+        DR->setExpression(ExprBuilder.intoExpression());
+      }
   };
 
   for (llvm::Instruction &I : instructions(Fn)) {
@@ -5852,8 +5865,8 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
         llvmFunc->dropAllReferences();
         llvmFunc->eraseFromParent();
       } else {
-        addAllocasForDeclareTargetFunctionPointerArgs(llvmFunc,
-                                                      moduleTranslation);
+        //addAllocasForDeclareTargetFunctionPointerArgs(llvmFunc,
+        //                                              moduleTranslation);
         updateDebugInfoForDeclareTargetFunctions(llvmFunc, moduleTranslation);
       }
     }
