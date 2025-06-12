@@ -5792,6 +5792,9 @@ static void updateDebugInfoForDeclareTargetFunctions(
     llvm::Function *Fn, LLVM::ModuleTranslation &moduleTranslation) {
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
   llvm::Module &M = ompBuilder->M;
+  unsigned int allocaAS = M.getDataLayout().getAllocaAddrSpace();
+  llvm::IRBuilderBase &builder = ompBuilder->Builder;
+  llvm::Type *ATy = builder.getPtrTy(allocaAS);
 
   if (!llvm::Triple(M.getTargetTriple()).isAMDGPU())
     return;
@@ -5826,7 +5829,7 @@ static void updateDebugInfoForDeclareTargetFunctions(
       } else if (Loc->getType()->isPointerTy()) {
         llvm::DIExprBuilder ExprBuilder(Fn->getContext());
         ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
-        ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+        //ExprBuilder.append<llvm::DIOp::Deref>(ATy);
         DR->setExpression(ExprBuilder.intoExpression());
       }
   };
