@@ -18,6 +18,7 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
@@ -4008,6 +4009,16 @@ public:
                                          ArrayRef<DIOp::Variant> Ops,
                                          unsigned ArgNo,
                                          Type *NewArgType = nullptr);
+
+  /// Create a copy of \p Expr updated to reflect that the debug operands
+  /// whose indexes are set in \p SpilledOpIndexes were spilled to the stack,
+  /// which is in the \p SpillAddrSpace address space.
+  ///
+  /// Handles both New and Old expressions, including Old expressions without
+  /// an explicit DW_OP_LLVM_arg.
+  static DIExpression *spillArgs(const DIExpression *Expr,
+                                 SmallBitVector SpilledOpIndexes,
+                                 unsigned SpillAddrSpace);
 
   /// Create a copy of \p Expr with each instance of
   /// `DW_OP_LLVM_arg, \p OldArg` replaced with `DW_OP_LLVM_arg, \p NewArg`,

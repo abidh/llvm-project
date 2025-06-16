@@ -2452,6 +2452,30 @@ DIExpression *DIExpression::appendNewOpsToArg(const DIExpression *Expr,
   return Builder.intoExpression();
 }
 
+DIExpression *DIExpression::spillArgs(const DIExpression *Expr,
+                                      SmallBitVector SpilledOpIndexes,
+                                      unsigned SpillAddrSpace) {
+  if (auto ExprOps = Expr->getNewElementsRef()) {
+    DIExprBuilder Builder(Expr->getContext());
+    auto *AllocaPtrTy = PointerType::get(Expr->getContext(), SpillAddrSpace);
+    for (auto Op : *ExprOps) {
+      DIOp::Arg *AsArg = std::get_if<DIOp::Arg>(&Op);
+      if (AsArg && SpilledOpIndexes.test(AsArg->getIndex())) {
+        Builder.append<DIOp::Arg>(AsArg->getIndex(), AllocaPtrTy);
+        Builder.append<DIOp::Deref>(AsArg->getResultType());
+      } else {
+        Builder.append(Op);
+      }
+    }
+    return Builder.intoExpression();
+  }
+
+  std::array<uint64_t, 1> Ops{{dwarf::DW_OP_deref}};
+  for (unsigned OpIdx : SpilledOpIndexes.set_bits())
+    Expr = DIExpression::appendOpsToArg(Expr, Ops, OpIdx);
+  return const_cast<DIExpression *>(Expr);
+}
+
 DIExpression *DIExpression::replaceArg(const DIExpression *Expr,
                                        uint64_t OldArg, uint64_t NewArg) {
   assert(Expr && "Can't replace args in this expression");
