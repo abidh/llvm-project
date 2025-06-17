@@ -5830,6 +5830,7 @@ static void updateDebugInfoForDeclareTargetFunctions(
         llvm::DIExprBuilder ExprBuilder(Fn->getContext());
         ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
         //ExprBuilder.append<llvm::DIOp::Deref>(ATy);
+        ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
         DR->setExpression(ExprBuilder.intoExpression());
       }
   };
