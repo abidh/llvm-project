@@ -6993,11 +6993,11 @@ static void FixupDebugInfoForOutlinedFunction(
       if (DR->getNumVariableLocationOps() != 1u)
         return;
       auto Loc = DR->getVariableLocationOp(0u);
-      bool PassByRef = false;
+      /*bool PassByRef = false;
       if (llvm::LoadInst *Load = dyn_cast<llvm::LoadInst>(Loc)) {
         Loc = Load->getPointerOperand();
         PassByRef = true;
-      }
+      }*/
       // Add DIOps based expression. Note that we generate an extra indirection
       // if an argument is mapped by reference. The first reads the pointer
       // from alloca and 2nd read the value of the variable from that pointer.
@@ -7009,7 +7009,7 @@ static void FixupDebugInfoForOutlinedFunction(
       // 2. Use double indirection and keep the original type. It will show up
       // in debugger as "x=5". This approached is used here as it is
       // consistent with the normal fortran parameters display.
-      if (auto AI = dyn_cast<llvm::AllocaInst>(Loc->stripPointerCasts())) {
+      /*if (auto AI = dyn_cast<llvm::AllocaInst>(Loc->stripPointerCasts())) {
         DR->replaceVariableLocationOp(0u, AI);
         llvm::DIExprBuilder ExprBuilder(Builder.getContext());
         ExprBuilder.append<llvm::DIOp::Arg>(0u, AI->getType());
@@ -7017,21 +7017,44 @@ static void FixupDebugInfoForOutlinedFunction(
           ExprBuilder.append<llvm::DIOp::Deref>(AI->getAllocatedType());
         ExprBuilder.append<llvm::DIOp::Deref>(AI->getAllocatedType());
         DR->setExpression(ExprBuilder.intoExpression());
+      }*/
+      if (Loc->getType()->isPointerTy()) {
+        llvm::DIExprBuilder ExprBuilder(Builder.getContext());
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->stripPointerCasts()->getType());
+        ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+        DR->setExpression(ExprBuilder.intoExpression());
       }
+
     }
 
     DR->setVariable(GetUpdatedDIVariable(OldVar, ArgNo));
   };
 
+  llvm::SmallVector<llvm::DbgVariableIntrinsic *> toMove;
   // The location and scope of variable intrinsics and records still point to
   // the parent function of the target region. Update them.
   for (Instruction &I : instructions(Func)) {
-    if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I))
+    if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
       UpdateDebugRecord(DDI);
+      auto Loc = DDI->getVariableLocationOp(0u);
+      if (llvm::Instruction *Inst = dyn_cast<llvm::Instruction>(Loc)) {
+        if (Inst->getParent() != I.getParent())
+          toMove.push_back(DDI);
+      }
+    }
 
     for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange()))
       UpdateDebugRecord(&DVR);
   }
+  for (size_t i = 0, e = toMove.size(); i != e; i++) {
+    auto Loc = toMove[i]->getVariableLocationOp(0u);
+    if (llvm::Instruction *Inst = dyn_cast<llvm::Instruction>(Loc)) {
+      toMove[i]->removeFromParent();
+      toMove[i]->insertAfter(Inst);
+    }
+  }
+  Func->dump();
+
   // An extra argument is passed to the device. Create the debug data for it.
   if (OMPBuilder.Config.isTargetDevice()) {
     DICompileUnit *CU = NewSP->getUnit();
