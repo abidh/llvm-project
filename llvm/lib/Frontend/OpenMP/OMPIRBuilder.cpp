@@ -7018,12 +7018,20 @@ static void FixupDebugInfoForOutlinedFunction(
         ExprBuilder.append<llvm::DIOp::Deref>(AI->getAllocatedType());
         DR->setExpression(ExprBuilder.intoExpression());
       }*/
+      llvm::DIExprBuilder ExprBuilder(Builder.getContext());
       if (Loc->getType()->isPointerTy()) {
-        llvm::DIExprBuilder ExprBuilder(Builder.getContext());
-        ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->stripPointerCasts()->getType());
-        ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
-        DR->setExpression(ExprBuilder.intoExpression());
-      }
+        auto Inst = Loc->stripPointerCasts();
+        if (auto AI = dyn_cast<llvm::AllocaInst>(Inst)) {
+          DR->replaceVariableLocationOp(0u, AI);
+          ExprBuilder.append<llvm::DIOp::Arg>(0u, AI->getType());
+          ExprBuilder.append<llvm::DIOp::Deref>(AI->getAllocatedType());
+        } else {
+          ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
+          ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
+        }
+      } else
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
+      DR->setExpression(ExprBuilder.intoExpression());
 
     }
 
@@ -7053,7 +7061,6 @@ static void FixupDebugInfoForOutlinedFunction(
       toMove[i]->insertAfter(Inst);
     }
   }
-  Func->dump();
 
   // An extra argument is passed to the device. Create the debug data for it.
   if (OMPBuilder.Config.isTargetDevice()) {

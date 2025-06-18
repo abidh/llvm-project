@@ -1293,11 +1293,25 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
         NewLoc, DR->getVariable(), Expr, DR->getDebugLoc(),
         NewFunc.getEntryBlock().getTerminator()->getIterator());
   };
+  Module *M = NewFunc.getParent();
   for (auto [Input, NewVal] : zip_equal(Inputs, NewValues)) {
     SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
     SmallVector<DbgVariableRecord *, 1> DPUsers;
     findDbgUsers(DbgUsers, Input, &DPUsers);
     DIExpression *Expr = DIB.createExpression();
+
+    if (Triple(M->getTargetTriple()).isAMDGPU()) {
+      if (NewVal->getType()->isPointerTy()) {
+        llvm::DIExprBuilder EB(Ctx);
+        EB.append<llvm::DIOp::Arg>(0u, NewVal->getType());
+        EB.append<llvm::DIOp::Deref>(NewVal->getType());
+        Expr = EB.intoExpression();
+      } else {
+        llvm::DIExprBuilder EB(Ctx);
+        EB.append<llvm::DIOp::Arg>(0u, NewVal->getType());
+        Expr = EB.intoExpression();
+      }
+    }
 
     // Iterate the debud users of the Input values. If they are in the extracted
     // function then update their location with the new value. If they are in
