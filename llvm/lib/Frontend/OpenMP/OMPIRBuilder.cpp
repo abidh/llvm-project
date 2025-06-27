@@ -6971,7 +6971,9 @@ static void FixupDebugInfoForOutlinedFunction(
       auto Iter = ValueReplacementMap.find(Loc);
       if (Iter != ValueReplacementMap.end()) {
         DR->replaceVariableLocationOp(Loc, std::get<0>(Iter->second));
-        ArgNo = std::get<1>(Iter->second) + 1;
+        ArgNo = (OMPBuilder.Config.isTargetDevice())
+                    ? OldVar->getArg() + 1
+                    : OldVar->getArg();
       }
     }
 
