@@ -72,6 +72,19 @@ convertToScheduleKind(std::optional<omp::ClauseScheduleKind> schedKind) {
   llvm_unreachable("unhandled schedule clause argument");
 }
 
+static void RestoreIP(llvm::IRBuilderBase &builder, llvm::IRBuilderBase::InsertPoint IP) {
+  builder.restoreIP(IP);
+  if (IP.isSet()) {
+    llvm::BasicBlock *TheBB(IP.getBlock());
+    llvm::BasicBlock::iterator I(IP.getPoint());
+    if (I == TheBB->end() && !TheBB->empty() && TheBB->back().getStableDebugLoc()) {
+      // If the insertion point is at the end of the block, we need to restore
+      // the debug location from the last instruction in the block.
+      builder.SetCurrentDebugLocation(TheBB->back().getStableDebugLoc());
+    }
+  }
+}
+
 /// ModuleTranslation stack frame for OpenMP operations. This keeps track of the
 /// insertion points for allocas.
 class OpenMPAllocaStackFrame
@@ -4306,7 +4319,8 @@ createAlteredByCaptureMap(MapInfoData &mapData,
           builder.restoreIP(findAllocaInsertPoint(builder, moduleTranslation));
           auto *memTempAlloc =
               builder.CreateAlloca(builder.getPtrTy(), nullptr, ".casted");
-          builder.restoreIP(curInsert);
+          //builder.restoreIP(curInsert);
+          RestoreIP(builder, curInsert);
 
           builder.CreateStore(newV, memTempAlloc);
           newV = builder.CreateLoad(builder.getPtrTy(), memTempAlloc);

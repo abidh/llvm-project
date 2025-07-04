@@ -92,6 +92,19 @@ static bool isConflictIP(IRBuilder<>::InsertPoint IP1,
   return IP1.getBlock() == IP2.getBlock() && IP1.getPoint() == IP2.getPoint();
 }
 
+static void RestoreIP(llvm::IRBuilderBase &builder, llvm::IRBuilderBase::InsertPoint IP) {
+  builder.restoreIP(IP);
+  if (IP.isSet()) {
+    BasicBlock *TheBB(IP.getBlock());
+    BasicBlock::iterator I(IP.getPoint());
+    if (I == TheBB->end() && !TheBB->empty() && TheBB->back().getStableDebugLoc()) {
+      // If the insertion point is at the end of the block, we need to restore
+      // the debug location from the last instruction in the block.
+      builder.SetCurrentDebugLocation(TheBB->back().getStableDebugLoc());
+    }
+  }
+}
+
 static bool isValidWorkshareLoopScheduleType(OMPScheduleType SchedType) {
   // Valid ordered/unordered and base algorithm combinations.
   switch (SchedType & ~OMPScheduleType::MonotonicityMask) {
@@ -1189,7 +1202,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitTargetKernel(
   Builder.restoreIP(AllocaIP);
   auto *KernelArgsPtr =
       Builder.CreateAlloca(OpenMPIRBuilder::KernelArgs, nullptr, "kernel_args");
-  Builder.restoreIP(Loc.IP);
+  //Builder.restoreIP(Loc.IP);
+  RestoreIP(Builder, Loc.IP);
 
   for (unsigned I = 0, Size = KernelArgs.size(); I != Size; ++I) {
     llvm::Value *Arg =
@@ -1217,6 +1231,7 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::emitKernelLaunch(
     return Loc.IP;
 
   Builder.restoreIP(Loc.IP);
+  //RestoreIP(Builder, Loc.IP);
   // On top of the arrays that were filled up, the target offloading call
   // takes as arguments the device id as well as the host pointer. The host
   // pointer is used by the runtime library to identify the current target
@@ -8715,7 +8730,7 @@ Error OpenMPIRBuilder::emitOffloadingArrays(
       AllocaInst *Buffer = Builder.CreateAlloca(
           SizeArrayType, /* ArraySize = */ nullptr, ".offload_sizes");
       Buffer->setAlignment(OffloadSizeAlign);
-      Builder.restoreIP(CodeGenIP);
+      RestoreIP(Builder, CodeGenIP);
       Builder.CreateMemCpy(
           Buffer, M.getDataLayout().getPrefTypeAlign(Buffer->getType()),
           SizesArrayGbl, OffloadSizeAlign,
