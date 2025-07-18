@@ -7445,12 +7445,35 @@ static void FixupDebugInfoForOutlinedFunction(
 
   // The location and scope of variable intrinsics and records still point to
   // the parent function of the target region. Update them.
-  for (Instruction &I : instructions(Func)) {
-    if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I))
+  for (inst_iterator II = inst_begin(Func), EI = inst_end(Func); II != EI;) {
+    Instruction &I = *II++;
+    if (auto *DDI = dyn_cast<llvm::DbgVariableIntrinsic>(&I)) {
       UpdateDebugRecord(DDI);
+      auto Loc = DDI->getVariableLocationOp(0u);
+      if (llvm::Instruction *LocInst = dyn_cast<llvm::Instruction>(Loc)) {
+        if (LocInst->getParent() != I.getParent())
+          DDI->moveBefore(LocInst->getParent()->back().getIterator());
+      } else if (llvm::isa<llvm::Argument>(Loc)) {
+        if (&Func->getEntryBlock() != DDI->getParent() &&
+            !Func->getEntryBlock().empty())
+          DDI->moveBefore(Func->getEntryBlock().back().getIterator());
+      }
+    }
 
-    for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange()))
+    for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
       UpdateDebugRecord(&DVR);
+      auto Loc = DVR.getVariableLocationOp(0u);
+      if (llvm::Instruction *LocInst = dyn_cast<llvm::Instruction>(Loc)) {
+        if (LocInst->getParent() != DVR.getParent())
+          LocInst->getParent()->back().adoptDbgRecords(DVR.getParent(),
+                                                       I.getIterator(), false);
+      } else if (isa<llvm::Argument>(Loc)) {
+        if (&Func->getEntryBlock() != DVR.getParent() &&
+            !Func->getEntryBlock().empty())
+          Func->getEntryBlock().back().adoptDbgRecords(DVR.getParent(),
+                                                       I.getIterator(), false);
+      }
+    }
   }
   // An extra argument is passed to the device. Create the debug data for it.
   if (OMPBuilder.Config.isTargetDevice()) {
