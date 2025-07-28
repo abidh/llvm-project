@@ -1193,7 +1193,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitTargetKernel(
   Builder.restoreIP(AllocaIP);
   auto *KernelArgsPtr =
       Builder.CreateAlloca(OpenMPIRBuilder::KernelArgs, nullptr, "kernel_args");
-  Builder.restoreIP(Loc.IP);
+  updateToLocation(Loc);
 
   for (unsigned I = 0, Size = KernelArgs.size(); I != Size; ++I) {
     llvm::Value *Arg =
@@ -8660,6 +8660,7 @@ Error OpenMPIRBuilder::emitOffloadingArrays(
   if (Info.NumberOfPtrs == 0)
     return Error::success();
 
+  llvm::DebugLoc DbgLoc = Builder.getCurrentDebugLocation();
   Builder.restoreIP(AllocaIP);
   // Detect if we have any capture size requiring runtime evaluation of the
   // size so that a constant array could be eventually used.
@@ -8703,6 +8704,7 @@ Error OpenMPIRBuilder::emitOffloadingArrays(
     ArrayType *SizeArrayType = ArrayType::get(Int64Ty, Info.NumberOfPtrs);
     Info.RTArgs.SizesArray = Builder.CreateAlloca(
         SizeArrayType, /* ArraySize = */ nullptr, ".offload_sizes");
+    Builder.SetCurrentDebugLocation(DbgLoc);
     Builder.restoreIP(CodeGenIP);
   } else {
     auto *SizesArrayInit = ConstantArray::get(
@@ -8722,6 +8724,7 @@ Error OpenMPIRBuilder::emitOffloadingArrays(
       AllocaInst *Buffer = Builder.CreateAlloca(
           SizeArrayType, /* ArraySize = */ nullptr, ".offload_sizes");
       Buffer->setAlignment(OffloadSizeAlign);
+      Builder.SetCurrentDebugLocation(DbgLoc);
       Builder.restoreIP(CodeGenIP);
       Builder.CreateMemCpy(
           Buffer, M.getDataLayout().getPrefTypeAlign(Buffer->getType()),
@@ -8732,6 +8735,7 @@ Error OpenMPIRBuilder::emitOffloadingArrays(
 
       Info.RTArgs.SizesArray = Buffer;
     }
+    Builder.SetCurrentDebugLocation(DbgLoc);
     Builder.restoreIP(CodeGenIP);
   }
 
