@@ -5919,12 +5919,14 @@ static void updateDebugInfoForDeclareTargetFunctions(
     auto Loc = DR->getVariableLocationOp(0u);
     llvm::DIExprBuilder EB(Fn->getContext());
     if (auto AI = dyn_cast<llvm::AllocaInst>(Loc->stripPointerCasts())) {
+      DR->replaceVariableLocationOp(0u, AI);
       EB.append<llvm::DIOp::Arg>(0u, AI->getType());
       EB.append<llvm::DIOp::Deref>(AI->getAllocatedType());
     } else if (Loc->getType()->isPointerTy()) {
-      EB.append<llvm::DIOp::Arg>(0u, Loc->stripPointerCasts()->getType());
+      EB.append<llvm::DIOp::Arg>(0u, Loc->getType());
       EB.append<llvm::DIOp::Deref>(Loc->getType());
-    }
+    } else
+      EB.append<llvm::DIOp::Arg>(0u, Loc->getType());
     DR->setExpression(EB.intoExpression());
   };
 
