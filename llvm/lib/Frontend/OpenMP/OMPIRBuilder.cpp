@@ -7425,20 +7425,18 @@ static void FixupDebugInfoForOutlinedFunction(
       if (DR->getNumVariableLocationOps() != 1u)
         return;
       auto Loc = DR->getVariableLocationOp(0u);
+      llvm::DIExprBuilder ExprBuilder(Builder.getContext());
       // Add DIOps based expressions.
       if (auto AI = dyn_cast<llvm::AllocaInst>(Loc->stripPointerCasts())) {
         DR->replaceVariableLocationOp(0u, AI);
-        llvm::DIExprBuilder ExprBuilder(Builder.getContext());
         ExprBuilder.append<llvm::DIOp::Arg>(0u, AI->getType());
         ExprBuilder.append<llvm::DIOp::Deref>(AI->getAllocatedType());
-        DR->setExpression(ExprBuilder.intoExpression());
       } else if (Loc->getType()->isPointerTy()) {
-        llvm::DIExprBuilder ExprBuilder(Builder.getContext());
-        ExprBuilder.append<llvm::DIOp::Arg>(
-            0u, Loc->stripPointerCasts()->getType());
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
         ExprBuilder.append<llvm::DIOp::Deref>(Loc->getType());
-        DR->setExpression(ExprBuilder.intoExpression());
-      }
+      } else
+        ExprBuilder.append<llvm::DIOp::Arg>(0u, Loc->getType());
+      DR->setExpression(ExprBuilder.intoExpression());
     }
 
     if (ArgNo != 0)
