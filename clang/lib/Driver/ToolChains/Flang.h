@@ -131,7 +131,8 @@ private:
   /// \param [in] Args The list of input driver arguments
   /// \param [out] CmdArgs The list of output command arguments
   void addOtherOptions(const llvm::opt::ArgList &Args,
-                       llvm::opt::ArgStringList &CmdArgs) const;
+                       llvm::opt::ArgStringList &CmdArgs, const JobAction &JA,
+                       const InputInfo &Output, const InputInfo &Input) const;
 
 public:
   Flang(const ToolChain &TC);

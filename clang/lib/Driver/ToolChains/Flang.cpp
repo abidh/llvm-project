@@ -120,7 +120,24 @@ static bool shouldLoopVersion(const ArgList &Args) {
   return false;
 }
 
-void Flang::addOtherOptions(const ArgList &Args, ArgStringList &CmdArgs) const {
+static bool checkDebugInfoOption(const Arg *A, const ArgList &Args,
+                                 const Driver &D, const ToolChain &TC) {
+  assert(A && "Expected non-nullptr argument.");
+  if (TC.supportsDebugInfoOption(A))
+    return true;
+  D.Diag(diag::warn_drv_unsupported_debug_info_opt_for_target)
+      << A->getAsString(Args) << TC.getTripleString();
+  return false;
+}
+
+void Flang::addOtherOptions(const llvm::opt::ArgList &Args,
+                       llvm::opt::ArgStringList &CmdArgs, const JobAction &JA,
+                       const InputInfo &Output, const InputInfo &Input) const {
+  const auto &TC = getToolChain();
+  const llvm::Triple &Triple = TC.getEffectiveTriple();
+  const std::string &TripleStr = Triple.getTriple();
+
+  const Driver &D = TC.getDriver();
   Args.addAllArgs(CmdArgs,
                   {options::OPT_module_dir, options::OPT_fdebug_module_writer,
                    options::OPT_fintrinsic_modules_path, options::OPT_pedantic,
@@ -144,6 +161,36 @@ void Flang::addOtherOptions(const ArgList &Args, ArgStringList &CmdArgs) const {
     const unsigned DwarfVersion = getDwarfVersion(getToolChain(), Args);
     CmdArgs.push_back(
         Args.MakeArgString("-dwarf-version=" + Twine(DwarfVersion)));
+  }
+  DwarfFissionKind DwarfFission = DwarfFissionKind::None;
+  if (Args.hasArg(options::OPT_g_Group)) {
+    // FIXME: -gsplit-dwarf on AIX is currently unimplemented.
+    if (TC.getTriple().isOSAIX() && Args.hasArg(options::OPT_gsplit_dwarf)) {
+      D.Diag(diag::err_drv_unsupported_opt_for_target)
+          << Args.getLastArg(options::OPT_gsplit_dwarf)->getSpelling()
+          << TC.getTriple().str();
+      return;
+    }
+    Arg *SplitDWARFArg;
+    DwarfFission = getDebugFissionKind(D, Args, SplitDWARFArg);
+    if (DwarfFission != DwarfFissionKind::None &&
+        !checkDebugInfoOption(SplitDWARFArg, Args, D, TC))
+      DwarfFission = DwarfFissionKind::None;
+  }
+  bool SplitDWARF = (DwarfFission != DwarfFissionKind::None) &&
+                    (TC.getTriple().isOSBinFormatELF() ||
+                     TC.getTriple().isOSBinFormatWasm() ||
+                     TC.getTriple().isOSBinFormatCOFF()) &&
+                    (isa<AssembleJobAction>(JA) || isa<CompileJobAction>(JA) ||
+                     isa<BackendJobAction>(JA));
+  if (SplitDWARF) {
+    const char *SplitDWARFOut = SplitDebugName(JA, Args, Input, Output);
+    CmdArgs.push_back("-split-dwarf-file");
+    CmdArgs.push_back(SplitDWARFOut);
+    if (DwarfFission == DwarfFissionKind::Split) {
+      CmdArgs.push_back("-split-dwarf-output");
+      CmdArgs.push_back(SplitDWARFOut);
+    }
   }
 }
 
@@ -937,7 +984,7 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
     renderRemarksOptions(Args, CmdArgs, Input);
 
   // Add other compile options
-  addOtherOptions(Args, CmdArgs);
+  addOtherOptions(Args, CmdArgs, JA, Output, Input);
 
   // Disable all warnings
   // TODO: Handle interactions between -w, -pedantic, -Wall, -WOption
