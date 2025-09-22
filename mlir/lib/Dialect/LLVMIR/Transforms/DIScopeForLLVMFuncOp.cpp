@@ -163,7 +163,7 @@ struct DIScopeForLLVMFuncOpPass
       compileUnitAttr = LLVM::DICompileUnitAttr::get(
           DistinctAttr::create(UnitAttr::get(context)), llvm::dwarf::DW_LANG_C,
           fileAttr, StringAttr::get(context, "MLIR"),
-          /*isOptimized=*/true, emissionKind);
+          /*isOptimized=*/true, emissionKind, StringAttr::get(context, ""));
     }
 
     module.walk<WalkOrder::PreOrder>([&](Operation *op) -> void {

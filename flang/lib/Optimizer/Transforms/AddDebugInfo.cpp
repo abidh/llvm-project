@@ -649,6 +649,8 @@ void AddDebugInfoPass::runOnOperation() {
     signalPassFailure();
     return;
   }
+  if (!splitDwarfFile.empty())
+    llvm::errs() << "Split File: " << splitDwarfFile << "\n";
   mlir::OpBuilder builder(context);
   if (dwarfVersion > 0) {
     mlir::OpBuilder::InsertionGuard guard(builder);
@@ -694,7 +696,9 @@ void AddDebugInfoPass::runOnOperation() {
   mlir::LLVM::DICompileUnitAttr cuAttr = mlir::LLVM::DICompileUnitAttr::get(
       mlir::DistinctAttr::create(mlir::UnitAttr::get(context)),
       llvm::dwarf::getLanguage("DW_LANG_Fortran95"), fileAttr, producer,
-      isOptimized, debugLevel);
+      isOptimized, debugLevel, splitDwarfFile.empty()
+                                    ? mlir::StringAttr()
+                                    : mlir::StringAttr::get(context, splitDwarfFile));
 
   module.walk([&](mlir::func::FuncOp funcOp) {
     handleFuncOp(funcOp, fileAttr, cuAttr, typeGen, &symbolTable);
