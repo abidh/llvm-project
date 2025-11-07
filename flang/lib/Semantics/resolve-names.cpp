@@ -4282,6 +4282,8 @@ void ModuleVisitor::BeginModule(const parser::Name &name, bool isSubmodule) {
                                        ModuleDetails{true}))
                              : MakeSymbol(name, ModuleDetails{false})};
   auto &details{symbol.get<ModuleDetails>()};
+  // Store the module declaration location for debug info
+  details.set_moduleLocation(name.source);
   PushScope(Scope::Kind::Module, &symbol);
   details.set_scope(&currScope());
   prevAccessStmt_ = std::nullopt;

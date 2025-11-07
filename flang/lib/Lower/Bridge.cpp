@@ -6481,6 +6481,54 @@ private:
   /// declarative construct.
   void lowerModuleDeclScope(Fortran::lower::pft::ModuleLikeUnit &mod) {
     setCurrentPosition(mod.getStartingSourceLoc());
+
+    // Emit module debug info metadata
+    const Fortran::semantics::Scope &modScope = mod.getScope();
+    if (const Fortran::semantics::Symbol *modSym = modScope.symbol()) {
+      if (const auto *modDetails =
+              modSym->detailsIf<Fortran::semantics::ModuleDetails>()) {
+        if (auto modLoc = modDetails->moduleLocation()) {
+          std::string moduleName = modSym->name().ToString();
+
+          // Get the line number
+          if (const Fortran::parser::AllCookedSources *cooked =
+                  bridge.getCookedSource()) {
+            if (std::optional<Fortran::parser::ProvenanceRange> provenance =
+                    cooked->GetProvenanceRange(*modLoc)) {
+              if (std::optional<Fortran::parser::SourcePosition>
+                      sourcePosition = cooked->allSources().GetSourcePosition(
+                          provenance->start())) {
+                unsigned lineNum = sourcePosition->line;
+
+                // Create and attach the module debug info attribute to the MLIR
+                // module
+                mlir::MLIRContext *context = &getMLIRContext();
+                auto moduleNameAttr =
+                    mlir::StringAttr::get(context, moduleName);
+                auto modDebugInfo = fir::ModuleDebugInfoAttr::get(
+                    context, moduleNameAttr, lineNum);
+
+                // Attach to the MLIR module operation
+                mlir::ModuleOp mlirModule = bridge.getModule();
+                llvm::SmallVector<mlir::Attribute> existingModDebugInfo;
+                if (auto existingAttr =
+                        mlirModule->getAttr("fir.module_debug_info")) {
+                  if (auto arrayAttr =
+                          mlir::dyn_cast<mlir::ArrayAttr>(existingAttr))
+                    existingModDebugInfo.append(arrayAttr.begin(),
+                                                arrayAttr.end());
+                }
+                existingModDebugInfo.push_back(modDebugInfo);
+                mlirModule->setAttr(
+                    "fir.module_debug_info",
+                    mlir::ArrayAttr::get(context, existingModDebugInfo));
+              }
+            }
+          }
+        }
+      }
+    }
+
     auto &scopeVariableListMap =
         Fortran::lower::pft::getScopeVariableListMap(mod);
     for (const auto &var : Fortran::lower::pft::getScopeVariableList(

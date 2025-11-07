@@ -67,9 +67,11 @@ private:
   llvm::DenseMap<fir::GlobalOp, llvm::SmallVector<mlir::Attribute>>
       globalToGlobalExprsMap;
 
-  mlir::LLVM::DIModuleAttr getOrCreateModuleAttr(
-      const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
-      mlir::LLVM::DIScopeAttr scope, unsigned line, bool decl);
+  mlir::LLVM::DIModuleAttr
+  getOrCreateModuleAttr(const std::string &name,
+                        mlir::LLVM::DIFileAttr fileAttr,
+                        mlir::LLVM::DIScopeAttr scope, unsigned line, bool decl,
+                        mlir::Operation *op);
   mlir::LLVM::DICommonBlockAttr
   getOrCreateCommonBlockAttr(llvm::StringRef name,
                              mlir::LLVM::DIFileAttr fileAttr,
@@ -103,6 +105,33 @@ bool debugInfoIsAlreadySet(mlir::Location loc) {
     return true;
   }
   return false;
+}
+
+// Look up the module declaration line number from the fir.module_debug_info
+// attribute attached to the MLIR module.
+// Returns std::nullopt if the module is not found in the attribute.
+static std::optional<unsigned>
+getModuleLineFromAttribute(mlir::Operation *op, llvm::StringRef moduleName) {
+  mlir::ModuleOp mlirModule = op->getParentOfType<mlir::ModuleOp>();
+  if (!mlirModule)
+    return std::nullopt;
+
+  auto modDebugInfoAttr = mlirModule->getAttr("fir.module_debug_info");
+  if (!modDebugInfoAttr)
+    return std::nullopt;
+
+  auto arrayAttr = mlir::dyn_cast<mlir::ArrayAttr>(modDebugInfoAttr);
+  if (!arrayAttr)
+    return std::nullopt;
+
+  // Search for this module's debug info
+  for (auto attr : arrayAttr) {
+    if (auto modInfo = mlir::dyn_cast<fir::ModuleDebugInfoAttr>(attr)) {
+      if (modInfo.getModuleName().getValue() == moduleName)
+        return modInfo.getLineNumber();
+    }
+  }
+  return std::nullopt;
 }
 
 // Generates the name for the artificial DISubprogram that we are going to
@@ -279,12 +308,17 @@ mlir::LLVM::DICommonBlockAttr AddDebugInfoPass::getOrCreateCommonBlockAttr(
 // map to avoid duplication.
 mlir::LLVM::DIModuleAttr AddDebugInfoPass::getOrCreateModuleAttr(
     const std::string &name, mlir::LLVM::DIFileAttr fileAttr,
-    mlir::LLVM::DIScopeAttr scope, unsigned line, bool decl) {
+    mlir::LLVM::DIScopeAttr scope, unsigned line, bool decl,
+    mlir::Operation *op) {
   mlir::MLIRContext *context = &getContext();
   mlir::LLVM::DIModuleAttr modAttr;
   if (auto iter{moduleMap.find(name)}; iter != moduleMap.end()) {
     modAttr = iter->getValue();
   } else {
+    // Look up the module declaration line from the module-level attribute.
+    if (auto moduleLine = getModuleLineFromAttribute(op, name))
+      line = *moduleLine;
+
     // When decl is true, it means that module is only being used in this
     // compilation unit and it is defined elsewhere. But if the file/line/scope
     // fields are valid, the module is not merged with its definition and is
@@ -323,9 +357,6 @@ AddDebugInfoPass::getModuleAttrFromGlobalOp(fir::GlobalOp globalOp,
   // one). The isInitialized() seems to provide the right information
   // but inverted. It is true where module is actually defined but false where
   // it is used.
-  // FIXME: Currently we don't have the line number on which a module was
-  // declared. We are using a best guess of line - 1 where line is the source
-  // line of the first member of the module that we encounter.
   unsigned line = getLineFromLoc(globalOp.getLoc());
 
   mlir::LLVM::DISubprogramAttr sp =
@@ -336,7 +367,7 @@ AddDebugInfoPass::getModuleAttrFromGlobalOp(fir::GlobalOp globalOp,
 
   return getOrCreateModuleAttr(result.second.modules[0], fileAttr, scope,
                                std::max(line - 1, (unsigned)1),
-                               !globalOp.isInitialized());
+                               !globalOp.isInitialized(), globalOp);
 }
 
 void AddDebugInfoPass::handleGlobalOp(fir::GlobalOp globalOp,
@@ -480,7 +511,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     }
   } else if (!result.second.modules.empty()) {
     Scope = getOrCreateModuleAttr(result.second.modules[0], fileAttr, cuAttr,
-                                  line - 1, false);
+                                  line - 1, false, funcOp);
   }
 
   auto addTargetOpDISP = [&](bool lineTableOnly,

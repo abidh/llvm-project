@@ -239,4 +239,18 @@ def fir_FortranInlineAttr
     : EnumAttr<FIROpsDialect, fir_FortranInlineEnum, "inline_attrs"> {
   let assemblyFormat = "`<` $value `>`";
 }
+
+def fir_ModuleDebugInfoAttr : fir_Attr<"ModuleDebugInfo"> {
+  let mnemonic = "module_debug_info";
+  let summary = "Line number information for a Fortran module";
+  let description = [{
+    This attribute stores line number information about a Fortran module. This
+    is used to generate debug information.
+  }];
+
+  let parameters = (ins "mlir::StringAttr":$module_name,
+      "unsigned":$line_number);
+
+  let assemblyFormat = "`<` $module_name `,` $line_number `>`";
+}
 #endif // FIR_DIALECT_FIR_ATTRS

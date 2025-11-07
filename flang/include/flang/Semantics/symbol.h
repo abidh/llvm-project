@@ -98,6 +98,8 @@ public:
   void set_moduleFileHash(ModuleCheckSumType x) { moduleFileHash_ = x; }
   const Symbol *previous() const { return previous_; }
   void set_previous(const Symbol *p) { previous_ = p; }
+  std::optional<SourceName> moduleLocation() const { return moduleLocation_; }
+  void set_moduleLocation(SourceName location) { moduleLocation_ = location; }
 
 private:
   bool isSubmodule_;
@@ -105,6 +107,7 @@ private:
   const Scope *scope_{nullptr};
   std::optional<ModuleCheckSumType> moduleFileHash_;
   const Symbol *previous_{nullptr}; // same name, different module file hash
+  std::optional<SourceName> moduleLocation_; // location of module statement
 };
 
 class MainProgramDetails : public WithOmpDeclarative {
