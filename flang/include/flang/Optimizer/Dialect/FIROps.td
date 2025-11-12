@@ -944,7 +944,7 @@ def fir_ReboxAssumedRankOp : fir_Op<"rebox_assumed_rank",
     Example:
     ```
       fir.rebox_assumed_rank %1 lbs zeroes : (!fir.box<!fir.array<*:f32>>) -> !fir.box<!fir.array<*:f32>>
-    ```    
+    ```
   }];
 
   let arguments = (ins
@@ -3051,6 +3051,65 @@ def fir_GlobalLenOp : fir_Op<"global_len", []> {
   let extraClassDeclaration = [{
     static constexpr llvm::StringRef getLenParamAttrName() { return "lenparam"; }
     static constexpr llvm::StringRef getIntAttrName() { return "intval"; }
+  }];
+}
+
+def fir_UseStmtOp : fir_Op<"use_stmt", [MemoryEffects<[MemWrite<DebuggingResource>]>]> {
+  let summary = "Represents a Fortran USE statement";
+  let description = [{
+    This operation records a Fortran USE statement with its associated only/rename
+    information. It has no runtime effect but preserves semantic information for
+    debug information generation.
+
+    The operation captures:
+    - The module being used (via module_name symbol reference)
+    - Symbol references to symbols imported via the ONLY clause (if present)
+    - Symbol renames (local_name and symbol reference)
+    - Whether the module is intrinsic
+
+    Examples:
+    ```
+      // USE mod1
+      fir.use_stmt @mod1
+
+      // USE mod1, ONLY: var2
+      fir.use_stmt @mod1 only_symbols [@_QMmod1Evar2]
+
+      // USE mod2, var4 => var3
+      fir.use_stmt @mod2 renames [#fir.use_rename<"var4", @_QMmod2Evar3>]
+
+      // USE mod2, ONLY: var1, renamed => original
+      fir.use_stmt @mod2 only_symbols [@_QMmod2Evar1]
+                   renames [#fir.use_rename<"renamed", @_QMmod2Eoriginal>]
+
+      // USE, INTRINSIC :: iso_c_binding
+      fir.use_stmt @iso_c_binding {is_intrinsic}
+    ```
+  }];
+
+  let arguments = (ins
+    FlatSymbolRefAttr:$module_name,
+    OptionalAttr<ArrayAttr>:$only_symbols,
+    OptionalAttr<ArrayAttr>:$renames,
+    UnitAttr:$is_intrinsic
+  );
+
+  let assemblyFormat = [{
+    $module_name
+    (`only_symbols` `[` $only_symbols^ `]`)?
+    (`renames` `[` $renames^ `]`)?
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    /// Returns true if this is a USE with ONLY clause
+    bool hasOnlyClause() { return getOnlySymbols().has_value(); }
+
+    /// Returns true if this has any renames
+    bool hasRenames() { return getRenames().has_value(); }
+
+    /// Returns true if this imports the entire module (no ONLY clause)
+    bool importsAll() { return !hasOnlyClause(); }
   }];
 }
 

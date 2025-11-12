@@ -237,6 +237,145 @@ static mlir::FlatSymbolRefAttr gatherComponentInit(
 /// class allows registering all the required type info while it is not
 /// possible to create GlobalOp/TypeInfoOp, and to generate this data afte
 /// function lowering.
+
+/// Extended PreservedUseStmt with mangled names for USE statement debug info
+struct UseStmtWithMangledNames {
+  std::string moduleName;
+  bool isIntrinsic;
+  std::vector<std::string> onlyMangledNames;
+  llvm::StringMap<std::string> renameMangledNames; // local_name => mangled_name
+};
+
+/// Collect USE statement information from a scope using preserved USE
+/// statement data (not inferred from symbols)
+static llvm::SmallVector<UseStmtWithMangledNames>
+collectUseStatementsFromScope(Fortran::lower::AbstractConverter &converter,
+                               const Fortran::semantics::Scope &scope) {
+  llvm::SmallVector<UseStmtWithMangledNames> useStmts;
+
+  // Use the preserved USE statement information from semantic analysis
+  // This gives us the actual source USE statement structure, not just
+  // which symbols ended up being USE-associated
+  for (const auto &preservedStmt : scope.preservedUseStmts()) {
+    UseStmtWithMangledNames info;
+    info.moduleName = preservedStmt.moduleName;
+    info.isIntrinsic = preservedStmt.isIntrinsic;
+
+    // Helper to look up a USE-associated symbol and get its mangled name
+    auto getMangledName = [&](const std::string &localName) -> std::string {
+      // Look up the symbol in the scope by local name
+      Fortran::parser::CharBlock charBlock{localName.data(), localName.size()};
+      const auto *sym = scope.FindSymbol(charBlock);
+      if (!sym)
+        return ""; // Symbol not found
+      
+      // Get the ultimate symbol (resolves USE associations)
+      const auto &ultimateSym = sym->GetUltimate();
+      
+      // Only mangle symbols that represent runtime entities (variables, procedures).
+      // Skip types - they cannot be mangled and don't generate debug info entries.
+      if (ultimateSym.has<Fortran::semantics::DerivedTypeDetails>() ||
+          ultimateSym.has<Fortran::semantics::TypeParamDetails>()) {
+        return ""; // Types cannot be mangled, skip them
+      }
+      
+      // Check for GenericDetails - only mangle if there's a specific procedure
+      if (const auto *generic =
+              ultimateSym.detailsIf<Fortran::semantics::GenericDetails>()) {
+        if (!generic->specific()) {
+          return ""; // Generic without specific cannot be mangled
+        }
+      }
+      
+      // This is a mangeable entity (variable, procedure, etc.)
+      return converter.mangleName(ultimateSym);
+    };
+
+    switch (preservedStmt.kind) {
+    case Fortran::semantics::PreservedUseStmt::Kind::UseOnly:
+      // USE mod, ONLY: list
+      // Look up mangled names for ONLY symbols
+      for (const auto &name : preservedStmt.onlyNames) {
+        std::string mangledName = getMangledName(name);
+        if (!mangledName.empty())
+          info.onlyMangledNames.push_back(mangledName);
+      }
+      // Get mangled names for renames within ONLY clause
+      for (const auto &[local, use] : preservedStmt.renames) {
+        std::string mangledName = getMangledName(local);
+        if (!mangledName.empty())
+          info.renameMangledNames[local] = mangledName;
+      }
+      break;
+
+    case Fortran::semantics::PreservedUseStmt::Kind::UseRenames:
+      // USE mod, renames (import all with some renames)
+      // Get mangled names for renames
+      for (const auto &[local, use] : preservedStmt.renames) {
+        std::string mangledName = getMangledName(local);
+        if (!mangledName.empty())
+          info.renameMangledNames[local] = mangledName;
+      }
+      break;
+
+    case Fortran::semantics::PreservedUseStmt::Kind::UseAll:
+      // USE mod (import all, no renames)
+      break;
+    }
+
+    useStmts.push_back(std::move(info));
+  }
+  
+  return useStmts;
+}
+
+/// Emit fir.use_stmt operations for the collected USE statements
+static void emitUseStatements(
+    mlir::OpBuilder &builder, mlir::Location loc,
+    const llvm::SmallVector<UseStmtWithMangledNames> &useStmts) {
+  mlir::MLIRContext *context = builder.getContext();
+
+  for (const auto &info : useStmts) {
+    // Create module symbol reference
+    mlir::FlatSymbolRefAttr moduleRef =
+        mlir::FlatSymbolRefAttr::get(context, info.moduleName);
+
+    // Prepare optional attributes for ONLY symbols
+    mlir::ArrayAttr onlySymbolsAttr;
+    if (!info.onlyMangledNames.empty()) {
+      llvm::SmallVector<mlir::Attribute> onlySymbolAttrs;
+      for (const auto &mangledName : info.onlyMangledNames) {
+        onlySymbolAttrs.push_back(
+            mlir::FlatSymbolRefAttr::get(context, mangledName));
+      }
+      onlySymbolsAttr = mlir::ArrayAttr::get(context, onlySymbolAttrs);
+    }
+
+    // Prepare optional attributes for renames
+    mlir::ArrayAttr renamesAttr;
+    if (!info.renameMangledNames.empty()) {
+      llvm::SmallVector<mlir::Attribute> renameAttrs;
+      for (const auto &[localName, mangledName] : info.renameMangledNames) {
+        auto localAttr = mlir::StringAttr::get(context, localName);
+        auto symbolRef = mlir::FlatSymbolRefAttr::get(context, mangledName);
+        auto renameAttr =
+            fir::UseRenameAttr::get(context, localAttr, symbolRef);
+        renameAttrs.push_back(renameAttr);
+      }
+      renamesAttr = mlir::ArrayAttr::get(context, renameAttrs);
+    }
+
+    mlir::UnitAttr isIntrinsicAttr;
+    if (info.isIntrinsic) {
+      isIntrinsicAttr = mlir::UnitAttr::get(context);
+    }
+
+    // Create fir.use_stmt operation
+    fir::UseStmtOp::create(builder, loc, moduleRef, onlySymbolsAttr,
+                           renamesAttr, isIntrinsicAttr);
+  }
+}
+
 class TypeInfoConverter {
   /// Store the location and symbols of derived type info to be generated.
   /// The location of the derived type instantiation is also stored because
@@ -6126,6 +6265,11 @@ private:
 
     mapDummiesAndResults(funit, callee);
 
+    // Emit USE statement operations for debug info generation
+    auto useStmts = collectUseStatementsFromScope(*this, funit.getScope());
+    if (!useStmts.empty())
+      emitUseStatements(*builder, toLocation(), useStmts);
+
     // Map host associated symbols from parent procedure if any.
     if (funit.parentHasHostAssoc())
       funit.parentHostAssoc().internalProcedureBindings(*this, localSymbols);
@@ -6507,6 +6651,10 @@ private:
 
       Fortran::lower::defineModuleVariable(*this, var);
     }
+    // Emit USE statement operations for debug info generation
+    auto useStmts = collectUseStatementsFromScope(*this, mod.getScope());
+    if (!useStmts.empty())
+      emitUseStatements(*builder, toLocation(), useStmts);
     for (auto &eval : mod.evaluationList)
       genFIR(eval);
   }

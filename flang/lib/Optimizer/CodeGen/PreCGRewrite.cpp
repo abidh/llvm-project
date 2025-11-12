@@ -362,6 +362,8 @@ public:
     target.addIllegalOp<fir::ReboxOp>();
     target.addIllegalOp<fir::DeclareOp>();
     target.addIllegalOp<fir::DummyScopeOp>();
+    // fir::UseStmtOp is NOT added here - it needs to be preserved for AddDebugInfo
+    // pass which runs after this pass. It will be removed during LLVM lowering.
     target.addDynamicallyLegalOp<fir::EmboxOp>([](fir::EmboxOp embox) {
       return !(embox.getShape() ||
                mlir::isa<fir::SequenceType>(
@@ -388,5 +390,7 @@ void fir::populatePreCGRewritePatterns(mlir::RewritePatternSet &patterns,
                                        bool preserveDeclare) {
   patterns.insert<EmboxConversion, ArrayCoorConversion, ReboxConversion,
                   DummyScopeOpConversion>(patterns.getContext());
+  // UseStmtOpConversion is NOT added - fir.use_stmt must be preserved
+  // for the AddDebugInfo pass
   patterns.add<DeclareOpConversion>(patterns.getContext(), preserveDeclare);
 }
