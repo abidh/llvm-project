@@ -517,6 +517,19 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   // their own DISubprograms. This lambda is called both in the LineTablesOnly path
   // and in the full debug info path.
   auto addTargetOpDISP = [&](mlir::omp::TargetOp targetOp) {
+    // When we process the DeclareOp inside the OpenMP target region, all the
+    // variables get the DISubprogram of the parent function of the target op as
+    // the scope. In the codegen (to llvm ir), OpenMP target op results in the
+    // creation of a separate function. As the variables in the debug info have
+    // the DISubprogram of the parent function as the scope, the variables
+    // need to be updated at codegen time to avoid verification failures.
+
+    // This updating after the fact becomes more and more difficult when types
+    // are dependent on local variables like in the case of variable size arrays
+    // or string. We not only have to generate new variables but also new types.
+    // We can avoid this problem by generating a DISubprogramAttr here for the
+    // target op and make sure that all the variables inside the target region
+    // get the correct scope in the first place.
     unsigned targetLine = getLineFromLoc(targetOp.getLoc());
     mlir::StringAttr name =
         getTargetFunctionName(context, targetOp.getLoc(), funcOp.getName());
@@ -777,12 +790,13 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
       targetMergedEntities.push_back(entity);
 
     // Create new DISubprogramAttr for target with merged entities
-    auto targetRecId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    // IMPORTANT: Reuse the existing targetSP.getId(), don't create a new one!
+    // The distinct ID must remain the same so MLIR translation can properly
+    // update references and merge debug info.
     auto targetNewSP = mlir::LLVM::DISubprogramAttr::get(
-        context, targetRecId, /*isRecSelf=*/false, targetSP.getId(),
-        targetSP.getCompileUnit(), targetSP.getScope(), targetSP.getName(),
-        targetSP.getLinkageName(), targetSP.getFile(), targetSP.getLine(),
-        targetSP.getScopeLine(), targetSP.getSubprogramFlags(),
+        context, targetSP.getId(), targetSP.getCompileUnit(), targetSP.getScope(),
+        targetSP.getName(), targetSP.getLinkageName(), targetSP.getFile(),
+        targetSP.getLine(), targetSP.getScopeLine(), targetSP.getSubprogramFlags(),
         targetSP.getType(), targetMergedEntities, /*annotations=*/{});
 
     targetOp->setLoc(builder.getFusedLoc(targetFusedLoc.getLocations(), targetNewSP));
