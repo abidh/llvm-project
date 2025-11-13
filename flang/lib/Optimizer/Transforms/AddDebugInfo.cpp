@@ -93,11 +93,10 @@ private:
                     mlir::LLVM::DICompileUnitAttr cuAttr,
                     fir::DebugTypeGenerator &typeGen,
                     mlir::SymbolTable *symbolTable);
-  llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr>
-  processDeferredUseStmt(DeferredUseStmt &deferred,
-                         mlir::LLVM::DIFileAttr fileAttr,
-                         mlir::LLVM::DICompileUnitAttr cuAttr,
-                         mlir::SymbolTable *symbolTable);
+  void processDeferredUseStmt(DeferredUseStmt &deferred,
+                              mlir::LLVM::DIFileAttr fileAttr,
+                              mlir::LLVM::DICompileUnitAttr cuAttr,
+                              mlir::SymbolTable *symbolTable);
   std::optional<mlir::LLVM::DIGlobalVariableAttr>
   lookupDIGlobalVariable(llvm::StringRef symbolName,
                          mlir::SymbolTable *symbolTable);
@@ -781,7 +780,8 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
 
   mlir::MLIRContext *context = &getContext();
   mlir::OpBuilder builder(context);
-  llvm::SmallVector<mlir::LLVM::DINodeAttr> entities;
+  llvm::SmallVector<mlir::LLVM::DINodeAttr> entities(importedModules.begin(),
+                                                       importedModules.end());
 
   auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(funcOp.getLoc());
   if (!fusedLoc)
@@ -793,11 +793,11 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
     return;
 
   // Merge with existing imported entities
+  llvm::SmallVector<mlir::LLVM::DINodeAttr> mergedEntities;
   for (auto existingEntity : existingSP.getRetainedNodes())
-    entities.push_back(existingEntity);
-
-  for (auto newEntity : importedModules)
-    entities.push_back(newEntity);
+    mergedEntities.push_back(existingEntity);
+  for (auto newEntity : entities)
+    mergedEntities.push_back(newEntity);
 
   // Create new DISubprogramAttr with merged entities
   auto newSP = mlir::LLVM::DISubprogramAttr::get(
@@ -805,16 +805,46 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
       existingSP.getCompileUnit(), existingSP.getScope(), existingSP.getName(),
       existingSP.getLinkageName(), existingSP.getFile(), existingSP.getLine(),
       existingSP.getScopeLine(), existingSP.getSubprogramFlags(),
-      existingSP.getType(), entities, /*annotations=*/{});
+      existingSP.getType(), mergedEntities, /*annotations=*/{});
 
   funcOp->setLoc(builder.getFusedLoc(fusedLoc.getLocations(), newSP));
+
+  // Also update OpenMP target operations in this function with the same imported entities
+  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
+    // Get the existing DISubprogram that was set on targetOp at line 585
+    auto targetFusedLoc = mlir::dyn_cast<mlir::FusedLoc>(targetOp.getLoc());
+    if (!targetFusedLoc)
+      return;
+
+    auto targetSP = mlir::dyn_cast<mlir::LLVM::DISubprogramAttr>(
+        targetFusedLoc.getMetadata());
+    if (!targetSP)
+      return;
+
+    // Merge with existing retained nodes from target's SP
+    llvm::SmallVector<mlir::LLVM::DINodeAttr> targetMergedEntities;
+    for (auto entity : targetSP.getRetainedNodes())
+      targetMergedEntities.push_back(entity);
+    for (auto entity : entities)
+      targetMergedEntities.push_back(entity);
+
+    // Create new DISubprogramAttr for target with merged entities
+    auto targetRecId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    auto targetNewSP = mlir::LLVM::DISubprogramAttr::get(
+        context, targetRecId, /*isRecSelf=*/false, targetSP.getId(),
+        targetSP.getCompileUnit(), targetSP.getScope(), targetSP.getName(),
+        targetSP.getLinkageName(), targetSP.getFile(), targetSP.getLine(),
+        targetSP.getScopeLine(), targetSP.getSubprogramFlags(),
+        targetSP.getType(), targetMergedEntities, /*annotations=*/{});
+
+    targetOp->setLoc(builder.getFusedLoc(targetFusedLoc.getLocations(), targetNewSP));
+  });
 }
 
-llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr>
-AddDebugInfoPass::processDeferredUseStmt(DeferredUseStmt &deferred,
-                                         mlir::LLVM::DIFileAttr fileAttr,
-                                         mlir::LLVM::DICompileUnitAttr cuAttr,
-                                         mlir::SymbolTable *symbolTable) {
+void AddDebugInfoPass::processDeferredUseStmt(DeferredUseStmt &deferred,
+                                              mlir::LLVM::DIFileAttr fileAttr,
+                                              mlir::LLVM::DICompileUnitAttr cuAttr,
+                                              mlir::SymbolTable *symbolTable) {
   mlir::MLIRContext *context = &getContext();
   fir::UseStmtOp useOp = deferred.useOp;
 
@@ -837,13 +867,11 @@ AddDebugInfoPass::processDeferredUseStmt(DeferredUseStmt &deferred,
     importedModules.insert(importedEntity);
   }
 
+  // This will update both the function and any OpenMP target operations
   updateSubprogramWithImportedEntities(deferred.funcOp, deferred.recId,
                                        importedModules);
 
   useOp.erase();
-
-  // Return the imported entities so they can be used for target operations
-  return importedModules;
 }
 
 void AddDebugInfoPass::runOnOperation() {
@@ -917,60 +945,9 @@ void AddDebugInfoPass::runOnOperation() {
 
   // NOW process deferred USE statements. At this point, all globals have
   // debug info (with correct array bounds), so DIGlobalVariable lookups will succeed.
-  // Track which functions have imported entities so we can apply them to target operations.
-  llvm::DenseMap<mlir::func::FuncOp, llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr>>
-      funcToImportedEntities;
+  // Note: updateSubprogramWithImportedEntities also handles OpenMP target operations.
   for (auto &deferred : deferredUseStmts) {
-    auto importedEntities =
-        processDeferredUseStmt(deferred, fileAttr, cuAttr, &symbolTable);
-    if (!importedEntities.empty()) {
-      funcToImportedEntities[deferred.funcOp].insert(importedEntities.begin(),
-                                                     importedEntities.end());
-    }
-  }
-
-  // Apply imported entities to OpenMP target operations in functions that have USE statements
-  for (auto &[funcOp, importedEntities] : funcToImportedEntities) {
-    llvm::SmallVector<mlir::LLVM::DINodeAttr> entities(importedEntities.begin(),
-                                                        importedEntities.end());
-    // Find all target operations in this function
-    funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-      // The target region will be outlined into a separate function.
-      // We need to find that outlined function and apply the imported entities to it.
-      // However, at this stage (AddDebugInfo pass), the outlining may not have
-      // occurred yet. We'll search for any func.func operations that might be
-      // outlined target regions and inherit the imported entities.
-      targetOp.getRegion().walk([&](mlir::func::FuncOp outlinedFunc) {
-        // Get existing DISubprogram from the outlined function
-        auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(outlinedFunc.getLoc());
-        if (!fusedLoc)
-          return;
-        
-        auto existingSP =
-            mlir::dyn_cast<mlir::LLVM::DISubprogramAttr>(fusedLoc.getMetadata());
-        if (!existingSP)
-          return;
-
-        // Merge with existing retained nodes
-        llvm::SmallVector<mlir::LLVM::DINodeAttr> mergedEntities;
-        for (auto entity : existingSP.getRetainedNodes())
-          mergedEntities.push_back(entity);
-        for (auto entity : entities)
-          mergedEntities.push_back(entity);
-
-        // Create new DISubprogramAttr with merged entities
-        auto recId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-        auto newSP = mlir::LLVM::DISubprogramAttr::get(
-            context, recId, /*isRecSelf=*/false, existingSP.getId(),
-            existingSP.getCompileUnit(), existingSP.getScope(),
-            existingSP.getName(), existingSP.getLinkageName(),
-            existingSP.getFile(), existingSP.getLine(),
-            existingSP.getScopeLine(), existingSP.getSubprogramFlags(),
-            existingSP.getType(), mergedEntities, /*annotations=*/{});
-
-        outlinedFunc->setLoc(builder.getFusedLoc(fusedLoc.getLocations(), newSP));
-      });
-    });
+    processDeferredUseStmt(deferred, fileAttr, cuAttr, &symbolTable);
   }
 
   // Clean up any remaining fir.use_stmt operations that weren't inside functions
