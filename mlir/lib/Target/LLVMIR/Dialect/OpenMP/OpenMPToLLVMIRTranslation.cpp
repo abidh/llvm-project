@@ -5712,27 +5712,27 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
     if (outlinedFnLoc && llvmParentFn->getSubprogram()) {
       llvm::DISubprogram *parentSP = outlinedFnLoc->getScope()->getSubprogram();
-      
+
       // Check if the target operation has debug_imported_entities attribute
-      if (auto importedEntitiesAttr = 
+      if (auto importedEntitiesAttr =
               targetOp->getAttrOfType<mlir::ArrayAttr>("debug_imported_entities")) {
         // Convert MLIR DIImportedEntityAttr to LLVM IR metadata
         llvm::SmallVector<llvm::Metadata *> retainedNodes;
-        
+
         // First, add existing retained nodes from parent SP
         if (auto *existingNodes = parentSP->getRetainedNodes().get())
           for (unsigned i = 0; i < existingNodes->getNumOperands(); ++i)
             retainedNodes.push_back(existingNodes->getOperand(i));
-        
+
         // Then add imported entities
         for (auto attr : importedEntitiesAttr) {
-          if (auto importedEntity = 
+          if (auto importedEntity =
                   llvm::dyn_cast<mlir::LLVM::DIImportedEntityAttr>(attr)) {
             if (auto *llvmMD = moduleTranslation.translateDebugInfo(importedEntity))
               retainedNodes.push_back(llvmMD);
           }
         }
-        
+
         // Create new DISubprogram with merged retained nodes
         llvm::DISubprogram *newSP = llvm::DISubprogram::get(
             llvmOutlinedFn->getContext(),

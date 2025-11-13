@@ -550,7 +550,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     unsigned targetCC = llvm::dwarf::getCallingConvention("DW_CC_normal");
     mlir::LLVM::DISubroutineTypeAttr spTy =
         mlir::LLVM::DISubroutineTypeAttr::get(context, targetCC, types);
-    
+
     auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
     auto targetSP = mlir::LLVM::DISubprogramAttr::get(
         context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
@@ -566,7 +566,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
         line, line, subprogramFlags, subTypeAttr, /*retainedNodes=*/{},
         /*annotations=*/{});
     funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
-    
+
     // Create DISubprogram for OpenMP target operations
     funcOp.walk(addTargetOpDISP);
     return;
@@ -580,7 +580,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
 
   mlir::LLVM::DISubprogramAttr spAttr;
   mlir::DistinctAttr recId;
-  
+
   if (!useStmts.empty()) {
     // USE statements found - need the recursive self-reference pattern.
     // The debug attributes in MLIR are readonly once created. But in case of
@@ -597,12 +597,12 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
         context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope, funcName,
         fullName, funcFileAttr, line, line, subprogramFlags, subTypeAttr,
         /*retainedNodes=*/{}, /*annotations=*/{});
-    
+
     // Defer processing of USE statements
     // Note: spAttr contains the recId, which can be retrieved via spAttr.getRecId()
     for (auto useOp : useStmts)
       deferredUseStmts.push_back({useOp, funcOp, spAttr});
-    
+
     // Create placeholder DISubprogramAttr - will be updated with imported entities later
     spAttr = mlir::LLVM::DISubprogramAttr::get(
         context, recId, /*isRecSelf=*/false, id2, compilationUnit, Scope,
@@ -615,9 +615,9 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
         line, line, subprogramFlags, subTypeAttr, /*retainedNodes=*/{},
         /*annotations=*/{});
   }
-  
+
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
-  
+
   // Create DISubprogram for OpenMP target operations (they will be outlined into separate functions)
   funcOp.walk(addTargetOpDISP);
 
@@ -758,7 +758,7 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
 
     // Get recId if it exists (used by function's DISubprogram for circular dependency)
     mlir::DistinctAttr recId = existingSP.getRecId();
-    
+
     if (recId) {
       // Function's DISubprogram - uses recId pattern for circular dependency with DIImportedEntity
       return mlir::LLVM::DISubprogramAttr::get(

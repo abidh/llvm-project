@@ -3638,17 +3638,17 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
   for (const auto &[name, symbol] : useModuleScope_->commonBlockUses()) {
     currScope().AddCommonBlockUse(name, symbol->attrs(), symbol->GetUltimate());
   }
-  
+
   // Preserve USE statement information for debug info generation
   std::string moduleName{x.moduleName.source.ToString()};
   bool isIntrinsic{x.nature &&
       *x.nature == parser::UseStmt::ModuleNature::Intrinsic};
-  
+
   if (const auto *onlyList{std::get_if<std::list<parser::Only>>(&x.u)}) {
     // USE mod, ONLY: list
     PreservedUseStmt stmt{
         moduleName, isIntrinsic, PreservedUseStmt::Kind::UseOnly};
-    
+
     for (const auto &only : *onlyList) {
       common::visit(
           common::visitors{
@@ -3692,7 +3692,7 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
           },
           only.u);
     }
-    
+
     currScope().add_preservedUseStmt(std::move(stmt));
   } else if (const auto *renameList{
                  std::get_if<std::list<parser::Rename>>(&x.u)}) {
@@ -3706,7 +3706,7 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
       // USE mod, renames (import all with some renames)
       PreservedUseStmt stmt{
           moduleName, isIntrinsic, PreservedUseStmt::Kind::UseRenames};
-      
+
       for (const auto &rename : *renameList) {
         common::visit(
             common::visitors{
@@ -3721,11 +3721,11 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
             },
             rename.u);
       }
-      
+
       currScope().add_preservedUseStmt(std::move(stmt));
     }
   }
-  
+
   useModuleScope_ = nullptr;
 }
 
