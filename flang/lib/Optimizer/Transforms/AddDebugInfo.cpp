@@ -513,7 +513,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   // OpenMP target operations are outlined into separate functions, so they need
   // their own DISubprograms. This lambda is called both in the LineTablesOnly path
   // and in the full debug info path.
-  auto addTargetOpDISP = [&](mlir::omp::TargetOp targetOp) {
+  auto addTargetOpDISP = [&](mlir::omp::TargetOp targetOp, bool useStmtFound = false) {
     // When we process the DeclareOp inside the OpenMP target region, all the
     // variables get the DISubprogram of the parent function of the target op as
     // the scope. In the codegen (to llvm ir), OpenMP target op results in the
@@ -548,7 +548,15 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
         mlir::LLVM::DISubroutineTypeAttr::get(context, targetCC, types);
 
     auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-    auto targetSP = mlir::LLVM::DISubprogramAttr::get(
+    auto recId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    mlir::LLVM::DISubprogramAttr targetSP;
+    if(useStmtFound)
+      targetSP = mlir::LLVM::DISubprogramAttr::get(
+        context, recId, /*isRecSelf=*/false, targetId, compilationUnit, Scope, name, name, funcFileAttr,
+        targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
+        /*annotations=*/{});
+    else
+      targetSP = mlir::LLVM::DISubprogramAttr::get(
         context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
         targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
         /*annotations=*/{});
@@ -564,7 +572,9 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
     // Create DISubprogram for OpenMP target operations
-    funcOp.walk(addTargetOpDISP);
+    funcOp.walk([&](mlir::omp::TargetOp targetOp) {
+      addTargetOpDISP(targetOp);
+    });
     return;
   }
 
@@ -615,7 +625,9 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
   // Create DISubprogram for OpenMP target operations (they will be outlined into separate functions)
-  funcOp.walk(addTargetOpDISP);
+  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
+    addTargetOpDISP(targetOp, !useStmts.empty());
+  });
 
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
     mlir::LLVM::DISubprogramAttr spTy = spAttr;
@@ -743,7 +755,7 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
                                                        importedModules.end());
 
   // Lambda to merge retained nodes with new entities and create updated DISubprogram
-  auto updateDISubprogram = [&](mlir::Operation *op) {
+  auto updateDISubprogram = [&](mlir::Operation *op, bool copyEntities) {
     auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(op->getLoc());
     if (!fusedLoc)
       return;
@@ -761,7 +773,7 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
     mlir::DistinctAttr recId = existingSP.getRecId();
     mlir::LLVM::DISubprogramAttr newSP;
 
-    if (recId) {
+    if (copyEntities) {
       // Function's DISubprogram - uses recId pattern for circular dependency
       // with DIImportedEntity. Add entities directly - they already have the
       // correct scope (the function's DISubprogram).
@@ -776,43 +788,22 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
           existingSP.getSubprogramFlags(), existingSP.getType(), mergedEntities,
           /*annotations=*/{});
     } else {
-      // Target's DISubprogram - needs recId to handle circular dependency
-      // when recreating imported entities with the target's scope.
-      // IMPORTANT: We must RECREATE the imported entities with the target's
-      // DISubprogram as scope. The original entities have the function's
-      // DISubprogram as scope, which would cause "retained node does not
-      // belong to subprogram" verification error.
-      
-      // Create a new recId for the target (different from function's recId)
-      auto targetRecId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-      
-      // Create recSelf placeholder to use as scope in imported entities
-      auto placeholderSP = mlir::LLVM::DISubprogramAttr::get(
-          context, targetRecId, /*isRecSelf=*/true, existingSP.getId(),
-          existingSP.getCompileUnit(), existingSP.getScope(),
-          existingSP.getName(), existingSP.getLinkageName(),
-          existingSP.getFile(), existingSP.getLine(), existingSP.getScopeLine(),
-          existingSP.getSubprogramFlags(), existingSP.getType(),
-          /*retainedNodes=*/{}, /*annotations=*/{});
-
       // Recreate each imported entity with the target's scope
       for (auto entity : entities) {
         if (auto importedEntity =
                 mlir::dyn_cast<mlir::LLVM::DIImportedEntityAttr>(entity)) {
           auto newEntity = mlir::LLVM::DIImportedEntityAttr::get(
-              context, importedEntity.getTag(), placeholderSP,
+              context, importedEntity.getTag(), existingSP,
               importedEntity.getEntity(), importedEntity.getFile(),
               importedEntity.getLine(), importedEntity.getName(),
               importedEntity.getElements());
           mergedEntities.push_back(newEntity);
-        } else {
-          mergedEntities.push_back(entity);
         }
       }
 
       // Now create the final DISubprogram with the same recId
       newSP = mlir::LLVM::DISubprogramAttr::get(
-          context, targetRecId, /*isRecSelf=*/false, existingSP.getId(),
+          context, recId, /*isRecSelf=*/false, existingSP.getId(),
           existingSP.getCompileUnit(), existingSP.getScope(),
           existingSP.getName(), existingSP.getLinkageName(),
           existingSP.getFile(), existingSP.getLine(), existingSP.getScopeLine(),
@@ -823,13 +814,13 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
   };
 
   // Update function's DISubprogram
-  updateDISubprogram(funcOp);
+  updateDISubprogram(funcOp, true);
 
   // Also update OpenMP target operations with recreated imported entities.
   // Targets are outlined into separate functions but they DO inherit the
   // parent's USE statements (modules are accessible in target regions).
   funcOp.walk(
-      [&](mlir::omp::TargetOp targetOp) { updateDISubprogram(targetOp); });
+      [&](mlir::omp::TargetOp targetOp) { updateDISubprogram(targetOp, false); });
 }
 
 void AddDebugInfoPass::runOnOperation() {
