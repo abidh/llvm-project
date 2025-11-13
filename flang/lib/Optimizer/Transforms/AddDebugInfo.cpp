@@ -72,7 +72,8 @@ private:
     fir::UseStmtOp useOp;
     mlir::func::FuncOp funcOp;
     mlir::LLVM::DISubprogramAttr spAttr;
-    mlir::DistinctAttr recId;
+    // Note: recId is not stored here because we can retrieve it from
+    // spAttr.getRecId() when needed
   };
   llvm::SmallVector<DeferredUseStmt> deferredUseStmts;
 
@@ -111,7 +112,7 @@ private:
       mlir::SymbolTable *symbolTable,
       llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr> &importedModules);
   void updateSubprogramWithImportedEntities(
-      mlir::func::FuncOp funcOp, mlir::DistinctAttr recId,
+      mlir::func::FuncOp funcOp,
       const llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr> &importedModules);
   bool createCommonBlockGlobal(fir::cg::XDeclareOp declOp,
                                const std::string &name,
@@ -598,8 +599,9 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
         /*retainedNodes=*/{}, /*annotations=*/{});
     
     // Defer processing of USE statements
+    // Note: spAttr contains the recId, which can be retrieved via spAttr.getRecId()
     for (auto useOp : useStmts)
-      deferredUseStmts.push_back({useOp, funcOp, spAttr, recId});
+      deferredUseStmts.push_back({useOp, funcOp, spAttr});
     
     // Create placeholder DISubprogramAttr - will be updated with imported entities later
     spAttr = mlir::LLVM::DISubprogramAttr::get(
@@ -734,7 +736,7 @@ void AddDebugInfoPass::processRenamesWithoutOnly(
 
 // Helper: Update function's DISubprogramAttr with imported entities
 void AddDebugInfoPass::updateSubprogramWithImportedEntities(
-    mlir::func::FuncOp funcOp, mlir::DistinctAttr recId,
+    mlir::func::FuncOp funcOp,
     const llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr> &importedModules) {
   if (importedModules.empty())
     return;
@@ -744,6 +746,40 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
   llvm::SmallVector<mlir::LLVM::DINodeAttr> entities(importedModules.begin(),
                                                        importedModules.end());
 
+  // Lambda to merge retained nodes with new entities and create updated DISubprogram
+  auto updateDISubprogram = [&](mlir::LLVM::DISubprogramAttr existingSP,
+                                 mlir::FusedLoc fusedLoc) -> mlir::LLVM::DISubprogramAttr {
+    // Merge existing retained nodes with new imported entities
+    llvm::SmallVector<mlir::LLVM::DINodeAttr> mergedEntities;
+    for (auto entity : existingSP.getRetainedNodes())
+      mergedEntities.push_back(entity);
+    for (auto entity : entities)
+      mergedEntities.push_back(entity);
+
+    // Get recId if it exists (used by function's DISubprogram for circular dependency)
+    mlir::DistinctAttr recId = existingSP.getRecId();
+    
+    if (recId) {
+      // Function's DISubprogram - uses recId pattern for circular dependency with DIImportedEntity
+      return mlir::LLVM::DISubprogramAttr::get(
+          context, recId, /*isRecSelf=*/false, existingSP.getId(),
+          existingSP.getCompileUnit(), existingSP.getScope(), existingSP.getName(),
+          existingSP.getLinkageName(), existingSP.getFile(), existingSP.getLine(),
+          existingSP.getScopeLine(), existingSP.getSubprogramFlags(),
+          existingSP.getType(), mergedEntities, /*annotations=*/{});
+    } else {
+      // Target's DISubprogram - no circular dependency, simpler pattern
+      // IMPORTANT: Reuse existingSP.getId() to keep references stable
+      return mlir::LLVM::DISubprogramAttr::get(
+          context, existingSP.getId(), existingSP.getCompileUnit(),
+          existingSP.getScope(), existingSP.getName(), existingSP.getLinkageName(),
+          existingSP.getFile(), existingSP.getLine(), existingSP.getScopeLine(),
+          existingSP.getSubprogramFlags(), existingSP.getType(), mergedEntities,
+          /*annotations=*/{});
+    }
+  };
+
+  // Update function's DISubprogram
   auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(funcOp.getLoc());
   if (!fusedLoc)
     return;
@@ -753,26 +789,11 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
   if (!existingSP)
     return;
 
-  // Merge with existing imported entities
-  llvm::SmallVector<mlir::LLVM::DINodeAttr> mergedEntities;
-  for (auto existingEntity : existingSP.getRetainedNodes())
-    mergedEntities.push_back(existingEntity);
-  for (auto newEntity : entities)
-    mergedEntities.push_back(newEntity);
-
-  // Create new DISubprogramAttr with merged entities
-  auto newSP = mlir::LLVM::DISubprogramAttr::get(
-      context, recId, /*isRecSelf=*/false, existingSP.getId(),
-      existingSP.getCompileUnit(), existingSP.getScope(), existingSP.getName(),
-      existingSP.getLinkageName(), existingSP.getFile(), existingSP.getLine(),
-      existingSP.getScopeLine(), existingSP.getSubprogramFlags(),
-      existingSP.getType(), mergedEntities, /*annotations=*/{});
-
+  auto newSP = updateDISubprogram(existingSP, fusedLoc);
   funcOp->setLoc(builder.getFusedLoc(fusedLoc.getLocations(), newSP));
 
   // Also update OpenMP target operations in this function with the same imported entities
   funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-    // Get the existing DISubprogram that was set on targetOp at line 585
     auto targetFusedLoc = mlir::dyn_cast<mlir::FusedLoc>(targetOp.getLoc());
     if (!targetFusedLoc)
       return;
@@ -782,23 +803,7 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
     if (!targetSP)
       return;
 
-    // Merge with existing retained nodes from target's SP
-    llvm::SmallVector<mlir::LLVM::DINodeAttr> targetMergedEntities;
-    for (auto entity : targetSP.getRetainedNodes())
-      targetMergedEntities.push_back(entity);
-    for (auto entity : entities)
-      targetMergedEntities.push_back(entity);
-
-    // Create new DISubprogramAttr for target with merged entities
-    // IMPORTANT: Reuse the existing targetSP.getId(), don't create a new one!
-    // The distinct ID must remain the same so MLIR translation can properly
-    // update references and merge debug info.
-    auto targetNewSP = mlir::LLVM::DISubprogramAttr::get(
-        context, targetSP.getId(), targetSP.getCompileUnit(), targetSP.getScope(),
-        targetSP.getName(), targetSP.getLinkageName(), targetSP.getFile(),
-        targetSP.getLine(), targetSP.getScopeLine(), targetSP.getSubprogramFlags(),
-        targetSP.getType(), targetMergedEntities, /*annotations=*/{});
-
+    auto targetNewSP = updateDISubprogram(targetSP, targetFusedLoc);
     targetOp->setLoc(builder.getFusedLoc(targetFusedLoc.getLocations(), targetNewSP));
   });
 }
@@ -830,8 +835,7 @@ void AddDebugInfoPass::processDeferredUseStmt(DeferredUseStmt &deferred,
   }
 
   // This will update both the function and any OpenMP target operations
-  updateSubprogramWithImportedEntities(deferred.funcOp, deferred.recId,
-                                       importedModules);
+  updateSubprogramWithImportedEntities(deferred.funcOp, importedModules);
 
   useOp.erase();
 }
