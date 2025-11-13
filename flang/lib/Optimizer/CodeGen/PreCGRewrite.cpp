@@ -390,7 +390,5 @@ void fir::populatePreCGRewritePatterns(mlir::RewritePatternSet &patterns,
                                        bool preserveDeclare) {
   patterns.insert<EmboxConversion, ArrayCoorConversion, ReboxConversion,
                   DummyScopeOpConversion>(patterns.getContext());
-  // UseStmtOpConversion is NOT added - fir.use_stmt must be preserved
-  // for the AddDebugInfo pass
   patterns.add<DeclareOpConversion>(patterns.getContext(), preserveDeclare);
 }
