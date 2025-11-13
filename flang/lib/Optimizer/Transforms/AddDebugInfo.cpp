@@ -512,6 +512,39 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
                                   line - 1, false);
   }
 
+  // Lambda to create DISubprogram for OpenMP target operations.
+  // OpenMP target operations are outlined into separate functions, so they need
+  // their own DISubprograms. This lambda is called both in the LineTablesOnly path
+  // and in the full debug info path.
+  auto addTargetOpDISP = [&](mlir::omp::TargetOp targetOp) {
+    unsigned targetLine = getLineFromLoc(targetOp.getLoc());
+    mlir::StringAttr name =
+        getTargetFunctionName(context, targetOp.getLoc(), funcOp.getName());
+    mlir::LLVM::DISubprogramFlags flags =
+        mlir::LLVM::DISubprogramFlags::Definition |
+        mlir::LLVM::DISubprogramFlags::LocalToUnit;
+    if (isOptimized)
+      flags = flags | mlir::LLVM::DISubprogramFlags::Optimized;
+
+    llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
+    types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
+    for (auto arg : targetOp.getRegion().getArguments()) {
+      auto tyAttr = typeGen.convertType(fir::unwrapRefType(arg.getType()),
+                                        fileAttr, cuAttr, /*declOp=*/nullptr);
+      types.push_back(tyAttr);
+    }
+    unsigned targetCC = llvm::dwarf::getCallingConvention("DW_CC_normal");
+    mlir::LLVM::DISubroutineTypeAttr spTy =
+        mlir::LLVM::DISubroutineTypeAttr::get(context, targetCC, types);
+    
+    auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    auto targetSP = mlir::LLVM::DISubprogramAttr::get(
+        context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
+        targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
+        /*annotations=*/{});
+    targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, targetSP));
+  };
+
   // Don't process variables if user asked for line tables only.
   if (debugLevel == mlir::LLVM::DIEmissionKind::LineTablesOnly) {
     auto spAttr = mlir::LLVM::DISubprogramAttr::get(
@@ -521,34 +554,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
     
     // Create DISubprogram for OpenMP target operations
-    funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-      unsigned targetLine = getLineFromLoc(targetOp.getLoc());
-      mlir::StringAttr name =
-          getTargetFunctionName(context, targetOp.getLoc(), funcOp.getName());
-      mlir::LLVM::DISubprogramFlags flags =
-          mlir::LLVM::DISubprogramFlags::Definition |
-          mlir::LLVM::DISubprogramFlags::LocalToUnit;
-      if (isOptimized)
-        flags = flags | mlir::LLVM::DISubprogramFlags::Optimized;
-
-      llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
-      types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
-      for (auto arg : targetOp.getRegion().getArguments()) {
-        auto tyAttr = typeGen.convertType(fir::unwrapRefType(arg.getType()),
-                                          fileAttr, cuAttr, /*declOp=*/nullptr);
-        types.push_back(tyAttr);
-      }
-      CC = llvm::dwarf::getCallingConvention("DW_CC_normal");
-      mlir::LLVM::DISubroutineTypeAttr spTy =
-          mlir::LLVM::DISubroutineTypeAttr::get(context, CC, types);
-      
-      auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-      auto targetSP = mlir::LLVM::DISubprogramAttr::get(
-          context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
-          targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
-          /*annotations=*/{});
-      targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, targetSP));
-    });
+    funcOp.walk(addTargetOpDISP);
     return;
   }
 
@@ -598,32 +604,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
   
   // Create DISubprogram for OpenMP target operations (they will be outlined into separate functions)
-  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-    unsigned targetLine = getLineFromLoc(targetOp.getLoc());
-    mlir::StringAttr name =
-        getTargetFunctionName(context, targetOp.getLoc(), funcOp.getName());
-    mlir::LLVM::DISubprogramFlags flags =
-        mlir::LLVM::DISubprogramFlags::Definition |
-        mlir::LLVM::DISubprogramFlags::LocalToUnit;
-    if (isOptimized)
-      flags = flags | mlir::LLVM::DISubprogramFlags::Optimized;
-
-    llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
-    types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
-    for (auto arg : targetOp.getRegion().getArguments()) {
-      auto tyAttr = typeGen.convertType(fir::unwrapRefType(arg.getType()),
-                                        fileAttr, cuAttr, /*declOp=*/nullptr);
-      types.push_back(tyAttr);
-    }
-    mlir::LLVM::DISubroutineTypeAttr spTy =
-        mlir::LLVM::DISubroutineTypeAttr::get(context, CC, types);
-    
-    auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-    auto targetSP = mlir::LLVM::DISubprogramAttr::get(
-        context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
-        targetLine, targetLine, flags, spTy, /*retainedNodes=*/{}, /*annotations=*/{});
-    targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, targetSP));
-  });
+  funcOp.walk(addTargetOpDISP);
 
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
     mlir::LLVM::DISubprogramAttr spTy = spAttr;
