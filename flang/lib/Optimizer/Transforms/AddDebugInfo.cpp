@@ -747,8 +747,16 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
                                                        importedModules.end());
 
   // Lambda to merge retained nodes with new entities and create updated DISubprogram
-  auto updateDISubprogram = [&](mlir::LLVM::DISubprogramAttr existingSP,
-                                 mlir::FusedLoc fusedLoc) -> mlir::LLVM::DISubprogramAttr {
+  auto updateDISubprogram = [&](mlir::Operation *op) {
+    auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(op->getLoc());
+    if (!fusedLoc)
+      return;
+
+    auto existingSP =
+        mlir::dyn_cast<mlir::LLVM::DISubprogramAttr>(fusedLoc.getMetadata());
+    if (!existingSP)
+      return;
+
     // Merge existing retained nodes with new imported entities
     llvm::SmallVector<mlir::LLVM::DINodeAttr> mergedEntities;
     for (auto entity : existingSP.getRetainedNodes())
@@ -756,56 +764,39 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
     for (auto entity : entities)
       mergedEntities.push_back(entity);
 
-    // Get recId if it exists (used by function's DISubprogram for circular dependency)
     mlir::DistinctAttr recId = existingSP.getRecId();
+    mlir::LLVM::DISubprogramAttr newSP;
 
     if (recId) {
-      // Function's DISubprogram - uses recId pattern for circular dependency with DIImportedEntity
-      return mlir::LLVM::DISubprogramAttr::get(
+      // Function's DISubprogram - uses recId pattern for circular dependency
+      // with DIImportedEntity
+      newSP = mlir::LLVM::DISubprogramAttr::get(
           context, recId, /*isRecSelf=*/false, existingSP.getId(),
-          existingSP.getCompileUnit(), existingSP.getScope(), existingSP.getName(),
-          existingSP.getLinkageName(), existingSP.getFile(), existingSP.getLine(),
-          existingSP.getScopeLine(), existingSP.getSubprogramFlags(),
-          existingSP.getType(), mergedEntities, /*annotations=*/{});
-    } else {
-      // Target's DISubprogram - no circular dependency, simpler pattern
-      // IMPORTANT: Reuse existingSP.getId() to keep references stable
-      return mlir::LLVM::DISubprogramAttr::get(
-          context, existingSP.getId(), existingSP.getCompileUnit(),
-          existingSP.getScope(), existingSP.getName(), existingSP.getLinkageName(),
+          existingSP.getCompileUnit(), existingSP.getScope(),
+          existingSP.getName(), existingSP.getLinkageName(),
           existingSP.getFile(), existingSP.getLine(), existingSP.getScopeLine(),
           existingSP.getSubprogramFlags(), existingSP.getType(), mergedEntities,
           /*annotations=*/{});
+    } else {
+      // Target's DISubprogram - no circular dependency, simpler pattern
+      // IMPORTANT: Reuse existingSP.getId() to keep references stable
+      newSP = mlir::LLVM::DISubprogramAttr::get(
+          context, existingSP.getId(), existingSP.getCompileUnit(),
+          existingSP.getScope(), existingSP.getName(),
+          existingSP.getLinkageName(), existingSP.getFile(),
+          existingSP.getLine(), existingSP.getScopeLine(),
+          existingSP.getSubprogramFlags(), existingSP.getType(), mergedEntities,
+          /*annotations=*/{});
     }
+    op->setLoc(builder.getFusedLoc(fusedLoc.getLocations(), newSP));
   };
 
-  // Update function's DISubprogram
-  auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(funcOp.getLoc());
-  if (!fusedLoc)
-    return;
+  updateDISubprogram(funcOp);
 
-  auto existingSP =
-      mlir::dyn_cast<mlir::LLVM::DISubprogramAttr>(fusedLoc.getMetadata());
-  if (!existingSP)
-    return;
-
-  auto newSP = updateDISubprogram(existingSP, fusedLoc);
-  funcOp->setLoc(builder.getFusedLoc(fusedLoc.getLocations(), newSP));
-
-  // Also update OpenMP target operations in this function with the same imported entities
-  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-    auto targetFusedLoc = mlir::dyn_cast<mlir::FusedLoc>(targetOp.getLoc());
-    if (!targetFusedLoc)
-      return;
-
-    auto targetSP = mlir::dyn_cast<mlir::LLVM::DISubprogramAttr>(
-        targetFusedLoc.getMetadata());
-    if (!targetSP)
-      return;
-
-    auto targetNewSP = updateDISubprogram(targetSP, targetFusedLoc);
-    targetOp->setLoc(builder.getFusedLoc(targetFusedLoc.getLocations(), targetNewSP));
-  });
+  // Also update OpenMP target operations in this function with the same
+  // imported entities
+  funcOp.walk(
+      [&](mlir::omp::TargetOp targetOp) { updateDISubprogram(targetOp); });
 }
 
 void AddDebugInfoPass::processDeferredUseStmt(DeferredUseStmt &deferred,
