@@ -3083,15 +3083,14 @@ def fir_UseStmtOp : fir_Op<"use_stmt", [MemoryEffects<[MemWrite<DebuggingResourc
                    renames [#fir.use_rename<"renamed", @_QMmod2Eoriginal>]
 
       // USE, INTRINSIC :: iso_c_binding
-      fir.use_stmt @iso_c_binding {is_intrinsic}
+      fir.use_stmt @iso_c_binding
     ```
   }];
 
   let arguments = (ins
     FlatSymbolRefAttr:$module_name,
     OptionalAttr<ArrayAttr>:$only_symbols,
-    OptionalAttr<ArrayAttr>:$renames,
-    UnitAttr:$is_intrinsic
+    OptionalAttr<ArrayAttr>:$renames
   );
 
   let assemblyFormat = [{

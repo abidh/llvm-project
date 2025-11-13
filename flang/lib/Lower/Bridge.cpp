@@ -341,15 +341,9 @@ static void emitUseStatementsFromScope(
       renamesAttr = mlir::ArrayAttr::get(context, renameAttrs);
     }
 
-    // Create intrinsic attribute if needed
-    mlir::UnitAttr isIntrinsicAttr;
-    if (preservedStmt.isIntrinsic) {
-      isIntrinsicAttr = mlir::UnitAttr::get(context);
-    }
-
     // Create fir.use_stmt operation
     fir::UseStmtOp::create(builder, loc, moduleRef, onlySymbolsAttr,
-                           renamesAttr, isIntrinsicAttr);
+                           renamesAttr);
   }
 }
 
