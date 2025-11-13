@@ -620,43 +620,19 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   // Collect fir.use_stmt operations for deferred processing.
   // We defer processing until AFTER all globals have debug info (with correct
   // array bounds from declOp), so that DIGlobalVariable lookups succeed.
-  bool hasUseStmts = false;
   funcOp.walk([&](fir::UseStmtOp useOp) {
     deferredUseStmts.push_back({useOp, funcOp, spAttr, recId});
-    hasUseStmts = true;
   });
 
-  // For now, create a placeholder DISubprogramAttr with empty imported entities.
-  // These will be filled in during deferred processing after all globals have debug info.
-  llvm::DenseSet<mlir::LLVM::DIImportedEntityAttr> importedModules;
-  llvm::SmallVector<mlir::LLVM::DINodeAttr> entities;
-
-  // If no USE statements were found, use the old fallback method (infer from DeclareOp)
-  if (!hasUseStmts) {
-    funcOp.walk([&](fir::cg::XDeclareOp declOp) {
-      if (&funcOp.front() == declOp->getBlock())
-        if (auto global =
-                symbolTable->lookup<fir::GlobalOp>(declOp.getUniqName())) {
-          std::optional<mlir::LLVM::DIModuleAttr> modOpt =
-              getModuleAttrFromGlobalOp(global, fileAttr, cuAttr);
-          if (modOpt) {
-            auto importedEntity = mlir::LLVM::DIImportedEntityAttr::get(
-                context, llvm::dwarf::DW_TAG_imported_module, spAttr, *modOpt,
-                fileAttr, /*line=*/1, /*name=*/nullptr, /*elements*/ {});
-            importedModules.insert(importedEntity);
-          }
-        }
-    });
-    entities.assign(importedModules.begin(), importedModules.end());
-  }
-
-  // Generate the final DISubprogramAttr (with entities if fallback was used, empty otherwise)
+  // Create DISubprogramAttr with empty retainedNodes for now.
+  // If USE statements were found, they will be processed later and the
+  // DISubprogramAttr will be updated with imported entities.
   spAttr = mlir::LLVM::DISubprogramAttr::get(
       context, recId, /*isRecSelf=*/false, id2, compilationUnit, Scope,
       funcName, fullName, funcFileAttr, line, line, subprogramFlags,
-      subTypeAttr, entities, /*annotations=*/{});
+      subTypeAttr, /*retainedNodes=*/{}, /*annotations=*/{});
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
-  addTargetOpDISP(/*lineTableOnly=*/false, entities);
+  addTargetOpDISP(/*lineTableOnly=*/false, /*entities=*/{});
 
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
     mlir::LLVM::DISubprogramAttr spTy = spAttr;
