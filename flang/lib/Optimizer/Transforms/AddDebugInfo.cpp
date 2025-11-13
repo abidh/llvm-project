@@ -512,23 +512,17 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
                                   line - 1, false);
   }
 
-  auto addTargetOpDISP = [&](bool lineTableOnly,
-                             llvm::ArrayRef<mlir::LLVM::DINodeAttr> entities) {
-    // When we process the DeclareOp inside the OpenMP target region, all the
-    // variables get the DISubprogram of the parent function of the target op as
-    // the scope. In the codegen (to llvm ir), OpenMP target op results in the
-    // creation of a separate function. As the variables in the debug info have
-    // the DISubprogram of the parent function as the scope, the variables
-    // need to be updated at codegen time to avoid verification failures.
-
-    // This updating after the fact becomes more and more difficult when types
-    // are dependent on local variables like in the case of variable size arrays
-    // or string. We not only have to generate new variables but also new types.
-    // We can avoid this problem by generating a DISubprogramAttr here for the
-    // target op and make sure that all the variables inside the target region
-    // get the correct scope in the first place.
+  // Don't process variables if user asked for line tables only.
+  if (debugLevel == mlir::LLVM::DIEmissionKind::LineTablesOnly) {
+    auto spAttr = mlir::LLVM::DISubprogramAttr::get(
+        context, id, compilationUnit, Scope, funcName, fullName, funcFileAttr,
+        line, line, subprogramFlags, subTypeAttr, /*retainedNodes=*/{},
+        /*annotations=*/{});
+    funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
+    
+    // Create DISubprogram for OpenMP target operations
     funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-      unsigned line = getLineFromLoc(targetOp.getLoc());
+      unsigned targetLine = getLineFromLoc(targetOp.getLoc());
       mlir::StringAttr name =
           getTargetFunctionName(context, targetOp.getLoc(), funcOp.getName());
       mlir::LLVM::DISubprogramFlags flags =
@@ -537,8 +531,6 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
       if (isOptimized)
         flags = flags | mlir::LLVM::DISubprogramFlags::Optimized;
 
-      mlir::DistinctAttr id =
-          mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
       llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
       types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
       for (auto arg : targetOp.getRegion().getArguments()) {
@@ -549,90 +541,89 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
       CC = llvm::dwarf::getCallingConvention("DW_CC_normal");
       mlir::LLVM::DISubroutineTypeAttr spTy =
           mlir::LLVM::DISubroutineTypeAttr::get(context, CC, types);
-      if (lineTableOnly) {
-        auto spAttr = mlir::LLVM::DISubprogramAttr::get(
-            context, id, compilationUnit, Scope, name, name, funcFileAttr, line,
-            line, flags, spTy, /*retainedNodes=*/{}, /*annotations=*/{});
-        targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, spAttr));
-        return;
-      }
-      mlir::DistinctAttr recId =
-          mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-      auto spAttr = mlir::LLVM::DISubprogramAttr::get(
-          context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope, name,
-          name, funcFileAttr, line, line, flags, spTy, /*retainedNodes=*/{},
+      
+      auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+      auto targetSP = mlir::LLVM::DISubprogramAttr::get(
+          context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
+          targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
           /*annotations=*/{});
-
-      // Make sure that information about the imported modules is copied in the
-      // new function.
-      llvm::SmallVector<mlir::LLVM::DINodeAttr> opEntities;
-      for (mlir::LLVM::DINodeAttr N : entities) {
-        if (auto entity = mlir::dyn_cast<mlir::LLVM::DIImportedEntityAttr>(N)) {
-          auto importedEntity = mlir::LLVM::DIImportedEntityAttr::get(
-              context, llvm::dwarf::DW_TAG_imported_module, spAttr,
-              entity.getEntity(), fileAttr, /*line=*/1, /*name=*/nullptr,
-              /*elements*/ {});
-          opEntities.push_back(importedEntity);
-        }
-      }
-
-      id = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-      spAttr = mlir::LLVM::DISubprogramAttr::get(
-          context, recId, /*isRecSelf=*/false, id, compilationUnit, Scope, name,
-          name, funcFileAttr, line, line, flags, spTy, opEntities,
-          /*annotations=*/{});
-      targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, spAttr));
+      targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, targetSP));
     });
-  };
-
-  // Don't process variables if user asked for line tables only.
-  if (debugLevel == mlir::LLVM::DIEmissionKind::LineTablesOnly) {
-    auto spAttr = mlir::LLVM::DISubprogramAttr::get(
-        context, id, compilationUnit, Scope, funcName, fullName, funcFileAttr,
-        line, line, subprogramFlags, subTypeAttr, /*retainedNodes=*/{},
-        /*annotations=*/{});
-    funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
-    addTargetOpDISP(/*lineTableOnly=*/true, /*entities=*/{});
     return;
   }
-
-  mlir::DistinctAttr recId =
-      mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-
-  // The debug attribute in MLIR are readonly once created. But in case of
-  // imported entities, we have a circular dependency. The
-  // DIImportedEntityAttr requires scope information (DISubprogramAttr in this
-  // case) and DISubprogramAttr requires the list of imported entities. The
-  // MLIR provides a way where a DISubprogramAttr an be created with a certain
-  // recID and be used in places like DIImportedEntityAttr. After that another
-  // DISubprogramAttr can be created with same recID but with list of entities
-  // now available. The MLIR translation code takes care of updating the
-  // references. Note that references will be updated only in the things that
-  // are part of DISubprogramAttr (like DIImportedEntityAttr) so we have to
-  // create the final DISubprogramAttr before we process local variables.
-  // Look at DIRecursiveTypeAttrInterface for more details.
-
-  auto spAttr = mlir::LLVM::DISubprogramAttr::get(
-      context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope, funcName,
-      fullName, funcFileAttr, line, line, subprogramFlags, subTypeAttr,
-      /*retainedNodes=*/{}, /*annotations=*/{});
 
   // Collect fir.use_stmt operations for deferred processing.
   // We defer processing until AFTER all globals have debug info (with correct
   // array bounds from declOp), so that DIGlobalVariable lookups succeed.
-  funcOp.walk([&](fir::UseStmtOp useOp) {
-    deferredUseStmts.push_back({useOp, funcOp, spAttr, recId});
-  });
+  llvm::SmallVector<fir::UseStmtOp> useStmts;
+  funcOp.walk([&](fir::UseStmtOp useOp) { useStmts.push_back(useOp); });
 
-  // Create DISubprogramAttr with empty retainedNodes for now.
-  // If USE statements were found, they will be processed later and the
-  // DISubprogramAttr will be updated with imported entities.
-  spAttr = mlir::LLVM::DISubprogramAttr::get(
-      context, recId, /*isRecSelf=*/false, id2, compilationUnit, Scope,
-      funcName, fullName, funcFileAttr, line, line, subprogramFlags,
-      subTypeAttr, /*retainedNodes=*/{}, /*annotations=*/{});
+  mlir::LLVM::DISubprogramAttr spAttr;
+  mlir::DistinctAttr recId;
+  
+  if (!useStmts.empty()) {
+    // USE statements found - need the recursive self-reference pattern.
+    // The debug attributes in MLIR are readonly once created. But in case of
+    // imported entities, we have a circular dependency. The
+    // DIImportedEntityAttr requires scope information (DISubprogramAttr in this
+    // case) and DISubprogramAttr requires the list of imported entities. The
+    // MLIR provides a way where a DISubprogramAttr can be created with a certain
+    // recID and be used in places like DIImportedEntityAttr. After that another
+    // DISubprogramAttr can be created with same recID but with list of entities
+    // now available. The MLIR translation code takes care of updating the
+    // references. Look at DIRecursiveTypeAttrInterface for more details.
+    recId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    spAttr = mlir::LLVM::DISubprogramAttr::get(
+        context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope, funcName,
+        fullName, funcFileAttr, line, line, subprogramFlags, subTypeAttr,
+        /*retainedNodes=*/{}, /*annotations=*/{});
+    
+    // Defer processing of USE statements
+    for (auto useOp : useStmts)
+      deferredUseStmts.push_back({useOp, funcOp, spAttr, recId});
+    
+    // Create placeholder DISubprogramAttr - will be updated with imported entities later
+    spAttr = mlir::LLVM::DISubprogramAttr::get(
+        context, recId, /*isRecSelf=*/false, id2, compilationUnit, Scope,
+        funcName, fullName, funcFileAttr, line, line, subprogramFlags,
+        subTypeAttr, /*retainedNodes=*/{}, /*annotations=*/{});
+  } else {
+    // No USE statements - create final DISubprogramAttr directly
+    spAttr = mlir::LLVM::DISubprogramAttr::get(
+        context, id2, compilationUnit, Scope, funcName, fullName, funcFileAttr,
+        line, line, subprogramFlags, subTypeAttr, /*retainedNodes=*/{},
+        /*annotations=*/{});
+  }
+  
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
-  addTargetOpDISP(/*lineTableOnly=*/false, /*entities=*/{});
+  
+  // Create DISubprogram for OpenMP target operations (they will be outlined into separate functions)
+  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
+    unsigned targetLine = getLineFromLoc(targetOp.getLoc());
+    mlir::StringAttr name =
+        getTargetFunctionName(context, targetOp.getLoc(), funcOp.getName());
+    mlir::LLVM::DISubprogramFlags flags =
+        mlir::LLVM::DISubprogramFlags::Definition |
+        mlir::LLVM::DISubprogramFlags::LocalToUnit;
+    if (isOptimized)
+      flags = flags | mlir::LLVM::DISubprogramFlags::Optimized;
+
+    llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
+    types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
+    for (auto arg : targetOp.getRegion().getArguments()) {
+      auto tyAttr = typeGen.convertType(fir::unwrapRefType(arg.getType()),
+                                        fileAttr, cuAttr, /*declOp=*/nullptr);
+      types.push_back(tyAttr);
+    }
+    mlir::LLVM::DISubroutineTypeAttr spTy =
+        mlir::LLVM::DISubroutineTypeAttr::get(context, CC, types);
+    
+    auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
+    auto targetSP = mlir::LLVM::DISubprogramAttr::get(
+        context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
+        targetLine, targetLine, flags, spTy, /*retainedNodes=*/{}, /*annotations=*/{});
+    targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, targetSP));
+  });
 
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
     mlir::LLVM::DISubprogramAttr spTy = spAttr;
