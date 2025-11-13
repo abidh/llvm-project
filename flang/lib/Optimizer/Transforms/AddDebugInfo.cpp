@@ -467,7 +467,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
       mlir::LLVM::DIFileAttr::get(context, fileName, filePath);
 
   // Only definitions need a distinct identifier and a compilation unit.
-  mlir::DistinctAttr id, id2;
+  mlir::DistinctAttr id;
   mlir::LLVM::DIScopeAttr Scope = fileAttr;
   mlir::LLVM::DICompileUnitAttr compilationUnit;
   mlir::LLVM::DISubprogramFlags subprogramFlags =
@@ -481,7 +481,6 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     // Place holder and final function have to have different IDs, otherwise
     // translation code will reject one of them.
     id = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
-    id2 = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
     compilationUnit = cuAttr;
     subprogramFlags =
         subprogramFlags | mlir::LLVM::DISubprogramFlags::Definition;
@@ -602,7 +601,7 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     // the references. Look at DIRecursiveTypeAttrInterface for more details.
     recId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
     spAttr = mlir::LLVM::DISubprogramAttr::get(
-        context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope,
+        context, recId, /*isRecSelf=*/false, id, compilationUnit, Scope,
         funcName, fullName, funcFileAttr, line, line, subprogramFlags,
         subTypeAttr,
         /*retainedNodes=*/{}, /*annotations=*/{});
@@ -612,17 +611,10 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     // spAttr.getRecId()
     for (auto useOp : useStmts)
       deferredUseStmts.push_back({useOp, funcOp, spAttr});
-
-    // Create placeholder DISubprogramAttr - will be updated with imported
-    // entities later
-    spAttr = mlir::LLVM::DISubprogramAttr::get(
-        context, recId, /*isRecSelf=*/false, id2, compilationUnit, Scope,
-        funcName, fullName, funcFileAttr, line, line, subprogramFlags,
-        subTypeAttr, /*retainedNodes=*/{}, /*annotations=*/{});
   } else {
     // No USE statements - create final DISubprogramAttr directly
     spAttr = mlir::LLVM::DISubprogramAttr::get(
-        context, id2, compilationUnit, Scope, funcName, fullName, funcFileAttr,
+        context, id, compilationUnit, Scope, funcName, fullName, funcFileAttr,
         line, line, subprogramFlags, subTypeAttr, /*retainedNodes=*/{},
         /*annotations=*/{});
   }
