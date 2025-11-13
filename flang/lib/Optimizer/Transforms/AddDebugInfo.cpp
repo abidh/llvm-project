@@ -946,19 +946,10 @@ void AddDebugInfoPass::runOnOperation() {
   // NOW process deferred USE statements. At this point, all globals have
   // debug info (with correct array bounds), so DIGlobalVariable lookups will succeed.
   // Note: updateSubprogramWithImportedEntities also handles OpenMP target operations.
+  // Any remaining fir.use_stmt operations (e.g., module-level) will be cleaned up
+  // by the CodeGen pass (UseStmtOpConversion), so no explicit cleanup is needed here.
   for (auto &deferred : deferredUseStmts) {
     processDeferredUseStmt(deferred, fileAttr, cuAttr, &symbolTable);
-  }
-
-  // Clean up any remaining fir.use_stmt operations that weren't inside functions
-  // (e.g., USE statements at module level). These can't generate debug info
-  // since they're not in a function scope, so we just erase them.
-  llvm::SmallVector<fir::UseStmtOp> remainingUseStmts;
-  module.walk([&](fir::UseStmtOp useOp) {
-    remainingUseStmts.push_back(useOp);
-  });
-  for (auto useOp : remainingUseStmts) {
-    useOp.erase();
   }
 
   // We have processed all functions. Attach common block variables to the
