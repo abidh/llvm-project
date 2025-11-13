@@ -5714,8 +5714,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       llvm::DISubprogram *parentSP = outlinedFnLoc->getScope()->getSubprogram();
 
       // Check if the target operation has debug_imported_entities attribute
-      if (auto importedEntitiesAttr =
-              targetOp->getAttrOfType<mlir::ArrayAttr>("debug_imported_entities")) {
+      if (auto importedEntitiesAttr = targetOp->getAttrOfType<mlir::ArrayAttr>(
+              "debug_imported_entities")) {
         // Convert MLIR DIImportedEntityAttr to LLVM IR metadata
         llvm::SmallVector<llvm::Metadata *> retainedNodes;
 
@@ -5728,32 +5728,23 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
         for (auto attr : importedEntitiesAttr) {
           if (auto importedEntity =
                   llvm::dyn_cast<mlir::LLVM::DIImportedEntityAttr>(attr)) {
-            if (auto *llvmMD = moduleTranslation.translateDebugInfo(importedEntity))
+            if (auto *llvmMD =
+                    moduleTranslation.translateDebugInfo(importedEntity))
               retainedNodes.push_back(llvmMD);
           }
         }
 
         // Create new DISubprogram with merged retained nodes
         llvm::DISubprogram *newSP = llvm::DISubprogram::get(
-            llvmOutlinedFn->getContext(),
-            parentSP->getScope(),
-            parentSP->getName(),
-            parentSP->getLinkageName(),
-            parentSP->getFile(),
-            parentSP->getLine(),
-            parentSP->getType(),
-            parentSP->getScopeLine(),
-            parentSP->getContainingType(),
-            parentSP->getVirtualIndex(),
-            parentSP->getThisAdjustment(),
-            parentSP->getFlags(),
-            parentSP->getSPFlags(),
-            parentSP->getUnit(),
-            parentSP->getTemplateParams(),
-            parentSP->getDeclaration(),
+            llvmOutlinedFn->getContext(), parentSP->getScope(),
+            parentSP->getName(), parentSP->getLinkageName(),
+            parentSP->getFile(), parentSP->getLine(), parentSP->getType(),
+            parentSP->getScopeLine(), parentSP->getContainingType(),
+            parentSP->getVirtualIndex(), parentSP->getThisAdjustment(),
+            parentSP->getFlags(), parentSP->getSPFlags(), parentSP->getUnit(),
+            parentSP->getTemplateParams(), parentSP->getDeclaration(),
             llvm::MDTuple::get(llvmOutlinedFn->getContext(), retainedNodes),
-            parentSP->getThrownTypes(),
-            parentSP->getAnnotations(),
+            parentSP->getThrownTypes(), parentSP->getAnnotations(),
             parentSP->getTargetFuncName());
         llvmOutlinedFn->setSubprogram(newSP);
       } else {

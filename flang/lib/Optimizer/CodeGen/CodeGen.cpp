@@ -4445,7 +4445,7 @@ void fir::populateFIRToLLVMConversionPatterns(
       UnboxCharOpConversion, UnboxProcOpConversion, UndefOpConversion,
       UnreachableOpConversion, UseStmtOpConversion, XArrayCoorOpConversion,
       XEmboxOpConversion, XReboxOpConversion, ZeroOpConversion>(converter,
-                                                                 options);
+                                                                options);
 
   // Patterns that are populated without a type converter do not trigger
   // target materializations for the operands of the root op.

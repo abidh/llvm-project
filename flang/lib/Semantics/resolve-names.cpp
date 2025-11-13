@@ -3641,8 +3641,8 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
 
   // Preserve USE statement information for debug info generation
   std::string moduleName{x.moduleName.source.ToString()};
-  bool isIntrinsic{x.nature &&
-      *x.nature == parser::UseStmt::ModuleNature::Intrinsic};
+  bool isIntrinsic{
+      x.nature && *x.nature == parser::UseStmt::ModuleNature::Intrinsic};
 
   if (const auto *onlyList{std::get_if<std::list<parser::Only>>(&x.u)}) {
     // USE mod, ONLY: list
@@ -3654,22 +3654,24 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
           common::visitors{
               [&](const parser::Rename &rename) {
                 // ONLY with rename: ONLY: local => use
-                // Note: Renamed symbols should ONLY go in renames, not onlyNames
-                // because the local name is not an actual module variable
-                common::visit(
-                    common::visitors{
-                        [&](const parser::Rename::Names &names) {
-                          std::string localName{
-                              std::get<0>(names.t).source.ToString()};
-                          std::string useName{
-                              std::get<1>(names.t).source.ToString()};
-                          stmt.renames[localName] = useName;
-                          // DO NOT add localName to onlyNames - it's a rename!
-                        },
-                        [&](const parser::Rename::Operators &) {
-                          // Operator renames - not commonly needed for debug info
-                        },
-                    },
+                // Note: Renamed symbols should ONLY go in renames, not
+                // onlyNames because the local name is not an actual module
+                // variable
+                common::visit(common::visitors{
+                                  [&](const parser::Rename::Names &names) {
+                                    std::string localName{
+                                        std::get<0>(names.t).source.ToString()};
+                                    std::string useName{
+                                        std::get<1>(names.t).source.ToString()};
+                                    stmt.renames[localName] = useName;
+                                    // DO NOT add localName to onlyNames - it's
+                                    // a rename!
+                                  },
+                                  [&](const parser::Rename::Operators &) {
+                                    // Operator renames - not commonly needed
+                                    // for debug info
+                                  },
+                              },
                     rename.u);
               },
               [&](const parser::Name &name) {
@@ -3677,16 +3679,18 @@ void ModuleVisitor::Post(const parser::UseStmt &x) {
                 stmt.onlyNames.push_back(name.source.ToString());
               },
               [&](const common::Indirection<parser::GenericSpec> &genericSpec) {
-                // Generic spec can contain a Name (for regular symbols) or operators
-                common::visit(
-                    common::visitors{
-                        [&](const parser::Name &name) {
-                          stmt.onlyNames.push_back(name.source.ToString());
-                        },
-                        [&](const auto &) {
-                          // Operators and special forms - not commonly needed for variable debug info
-                        },
-                    },
+                // Generic spec can contain a Name (for regular symbols) or
+                // operators
+                common::visit(common::visitors{
+                                  [&](const parser::Name &name) {
+                                    stmt.onlyNames.push_back(
+                                        name.source.ToString());
+                                  },
+                                  [&](const auto &) {
+                                    // Operators and special forms - not
+                                    // commonly needed for variable debug info
+                                  },
+                              },
                     genericSpec.value().u);
               },
           },

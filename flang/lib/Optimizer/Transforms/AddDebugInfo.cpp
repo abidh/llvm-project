@@ -67,7 +67,8 @@ private:
   llvm::DenseMap<fir::GlobalOp, llvm::SmallVector<mlir::Attribute>>
       globalToGlobalExprsMap;
 
-  // Structure to hold collected USE statement information for deferred processing
+  // Structure to hold collected USE statement information for deferred
+  // processing
   struct DeferredUseStmt {
     fir::UseStmtOp useOp;
     mlir::func::FuncOp funcOp;
@@ -511,9 +512,10 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
 
   // Lambda to create DISubprogram for OpenMP target operations.
   // OpenMP target operations are outlined into separate functions, so they need
-  // their own DISubprograms. This lambda is called both in the LineTablesOnly path
-  // and in the full debug info path.
-  auto addTargetOpDISP = [&](mlir::omp::TargetOp targetOp, bool useStmtFound = false) {
+  // their own DISubprograms. This lambda is called both in the LineTablesOnly
+  // path and in the full debug info path.
+  auto addTargetOpDISP = [&](mlir::omp::TargetOp targetOp,
+                             bool useStmtFound = false) {
     // When we process the DeclareOp inside the OpenMP target region, all the
     // variables get the DISubprogram of the parent function of the target op as
     // the scope. In the codegen (to llvm ir), OpenMP target op results in the
@@ -550,16 +552,17 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     auto targetId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
     auto recId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
     mlir::LLVM::DISubprogramAttr targetSP;
-    if(useStmtFound)
+    if (useStmtFound)
       targetSP = mlir::LLVM::DISubprogramAttr::get(
-        context, recId, /*isRecSelf=*/false, targetId, compilationUnit, Scope, name, name, funcFileAttr,
-        targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
-        /*annotations=*/{});
+          context, recId, /*isRecSelf=*/false, targetId, compilationUnit, Scope,
+          name, name, funcFileAttr, targetLine, targetLine, flags, spTy,
+          /*retainedNodes=*/{},
+          /*annotations=*/{});
     else
       targetSP = mlir::LLVM::DISubprogramAttr::get(
-        context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
-        targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
-        /*annotations=*/{});
+          context, targetId, compilationUnit, Scope, name, name, funcFileAttr,
+          targetLine, targetLine, flags, spTy, /*retainedNodes=*/{},
+          /*annotations=*/{});
     targetOp->setLoc(builder.getFusedLoc({targetOp.getLoc()}, targetSP));
   };
 
@@ -572,9 +575,8 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
     // Create DISubprogram for OpenMP target operations
-    funcOp.walk([&](mlir::omp::TargetOp targetOp) {
-      addTargetOpDISP(targetOp);
-    });
+    funcOp.walk(
+        [&](mlir::omp::TargetOp targetOp) { addTargetOpDISP(targetOp); });
     return;
   }
 
@@ -593,23 +595,26 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
     // imported entities, we have a circular dependency. The
     // DIImportedEntityAttr requires scope information (DISubprogramAttr in this
     // case) and DISubprogramAttr requires the list of imported entities. The
-    // MLIR provides a way where a DISubprogramAttr can be created with a certain
-    // recID and be used in places like DIImportedEntityAttr. After that another
-    // DISubprogramAttr can be created with same recID but with list of entities
-    // now available. The MLIR translation code takes care of updating the
-    // references. Look at DIRecursiveTypeAttrInterface for more details.
+    // MLIR provides a way where a DISubprogramAttr can be created with a
+    // certain recID and be used in places like DIImportedEntityAttr. After that
+    // another DISubprogramAttr can be created with same recID but with list of
+    // entities now available. The MLIR translation code takes care of updating
+    // the references. Look at DIRecursiveTypeAttrInterface for more details.
     recId = mlir::DistinctAttr::create(mlir::UnitAttr::get(context));
     spAttr = mlir::LLVM::DISubprogramAttr::get(
-        context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope, funcName,
-        fullName, funcFileAttr, line, line, subprogramFlags, subTypeAttr,
+        context, recId, /*isRecSelf=*/true, id, compilationUnit, Scope,
+        funcName, fullName, funcFileAttr, line, line, subprogramFlags,
+        subTypeAttr,
         /*retainedNodes=*/{}, /*annotations=*/{});
 
     // Defer processing of USE statements
-    // Note: spAttr contains the recId, which can be retrieved via spAttr.getRecId()
+    // Note: spAttr contains the recId, which can be retrieved via
+    // spAttr.getRecId()
     for (auto useOp : useStmts)
       deferredUseStmts.push_back({useOp, funcOp, spAttr});
 
-    // Create placeholder DISubprogramAttr - will be updated with imported entities later
+    // Create placeholder DISubprogramAttr - will be updated with imported
+    // entities later
     spAttr = mlir::LLVM::DISubprogramAttr::get(
         context, recId, /*isRecSelf=*/false, id2, compilationUnit, Scope,
         funcName, fullName, funcFileAttr, line, line, subprogramFlags,
@@ -624,7 +629,8 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
 
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
 
-  // Create DISubprogram for OpenMP target operations (they will be outlined into separate functions)
+  // Create DISubprogram for OpenMP target operations (they will be outlined
+  // into separate functions)
   funcOp.walk([&](mlir::omp::TargetOp targetOp) {
     addTargetOpDISP(targetOp, !useStmts.empty());
   });
@@ -656,7 +662,9 @@ AddDebugInfoPass::lookupDIGlobalVariable(llvm::StringRef symbolName,
       if (auto metadata = fusedLoc.getMetadata()) {
         if (auto arrayAttr = mlir::dyn_cast<mlir::ArrayAttr>(metadata)) {
           for (auto elem : arrayAttr) {
-            if (auto gvExpr = mlir::dyn_cast<mlir::LLVM::DIGlobalVariableExpressionAttr>(elem)) {
+            if (auto gvExpr =
+                    mlir::dyn_cast<mlir::LLVM::DIGlobalVariableExpressionAttr>(
+                        elem)) {
               auto gvAttr = gvExpr.getVar();
               if (gvAttr.getIsDefined())
                 return gvAttr;
@@ -678,7 +686,7 @@ void AddDebugInfoPass::processOnlyClause(
   mlir::MLIRContext *context = &getContext();
 
   auto createImportedDecl = [&](llvm::StringRef symbolName,
-                                 mlir::StringAttr localNameAttr) {
+                                mlir::StringAttr localNameAttr) {
     if (auto gvAttr = lookupDIGlobalVariable(symbolName, symbolTable)) {
       auto importedDecl = mlir::LLVM::DIImportedEntityAttr::get(
           context, llvm::dwarf::DW_TAG_imported_declaration, spAttr, *gvAttr,
@@ -752,9 +760,10 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
   mlir::MLIRContext *context = &getContext();
   mlir::OpBuilder builder(context);
   llvm::SmallVector<mlir::LLVM::DINodeAttr> entities(importedModules.begin(),
-                                                       importedModules.end());
+                                                     importedModules.end());
 
-  // Lambda to merge retained nodes with new entities and create updated DISubprogram
+  // Lambda to merge retained nodes with new entities and create updated
+  // DISubprogram
   auto updateDISubprogram = [&](mlir::Operation *op, bool copyEntities) {
     auto fusedLoc = mlir::dyn_cast<mlir::FusedLoc>(op->getLoc());
     if (!fusedLoc)
@@ -819,8 +828,9 @@ void AddDebugInfoPass::updateSubprogramWithImportedEntities(
   // Also update OpenMP target operations with recreated imported entities.
   // Targets are outlined into separate functions but they DO inherit the
   // parent's USE statements (modules are accessible in target regions).
-  funcOp.walk(
-      [&](mlir::omp::TargetOp targetOp) { updateDISubprogram(targetOp, false); });
+  funcOp.walk([&](mlir::omp::TargetOp targetOp) {
+    updateDISubprogram(targetOp, false);
+  });
 }
 
 void AddDebugInfoPass::runOnOperation() {
@@ -893,12 +903,11 @@ void AddDebugInfoPass::runOnOperation() {
   });
 
   // NOW process deferred USE statements. At this point, all globals have
-  // debug info (with correct array bounds), so DIGlobalVariable lookups will succeed.
-  // Group USE statements by function to avoid redundant updates, especially
-  // important for OpenMP target operations which would otherwise be processed
-  // multiple times (once per USE statement).
-  llvm::DenseMap<mlir::func::FuncOp,
-                 llvm::SmallVector<DeferredUseStmt *>>
+  // debug info (with correct array bounds), so DIGlobalVariable lookups will
+  // succeed. Group USE statements by function to avoid redundant updates,
+  // especially important for OpenMP target operations which would otherwise be
+  // processed multiple times (once per USE statement).
+  llvm::DenseMap<mlir::func::FuncOp, llvm::SmallVector<DeferredUseStmt *>>
       useStmtsByFunc;
   for (auto &deferred : deferredUseStmts)
     useStmtsByFunc[deferred.funcOp].push_back(&deferred);
@@ -921,7 +930,7 @@ void AddDebugInfoPass::runOnOperation() {
                           &symbolTable, importedModules);
       } else if (useOp.hasRenames()) {
         processRenamesWithoutOnly(useOp, deferred->spAttr, modAttr, fileAttr,
-                                   &symbolTable, importedModules);
+                                  &symbolTable, importedModules);
       } else {
         // Simple module import
         auto importedEntity = mlir::LLVM::DIImportedEntityAttr::get(

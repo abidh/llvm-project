@@ -3054,7 +3054,8 @@ def fir_GlobalLenOp : fir_Op<"global_len", []> {
   }];
 }
 
-def fir_UseStmtOp : fir_Op<"use_stmt", [MemoryEffects<[MemWrite<DebuggingResource>]>]> {
+def fir_UseStmtOp
+    : fir_Op<"use_stmt", [MemoryEffects<[MemWrite<DebuggingResource>]>]> {
   let summary = "Represents a Fortran USE statement";
   let description = [{
     This operation records a Fortran USE statement with its associated only/rename
@@ -3087,11 +3088,8 @@ def fir_UseStmtOp : fir_Op<"use_stmt", [MemoryEffects<[MemWrite<DebuggingResourc
     ```
   }];
 
-  let arguments = (ins
-    FlatSymbolRefAttr:$module_name,
-    OptionalAttr<ArrayAttr>:$only_symbols,
-    OptionalAttr<ArrayAttr>:$renames
-  );
+  let arguments = (ins FlatSymbolRefAttr:$module_name,
+      OptionalAttr<ArrayAttr>:$only_symbols, OptionalAttr<ArrayAttr>:$renames);
 
   let assemblyFormat = [{
     $module_name

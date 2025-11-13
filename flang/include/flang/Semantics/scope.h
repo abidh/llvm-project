@@ -60,13 +60,13 @@ using EquivalenceSet = std::vector<EquivalenceObject>;
 // the resulting USE-associated symbols.
 struct PreservedUseStmt {
   enum class Kind { UseOnly, UseRenames, UseAll };
-  
+
   std::string moduleName;
   bool isIntrinsic{false};
   Kind kind;
-  std::vector<std::string> onlyNames;  // For Kind::UseOnly
-  std::map<std::string, std::string> renames;  // local_name => use_name
-  
+  std::vector<std::string> onlyNames; // For Kind::UseOnly
+  std::map<std::string, std::string> renames; // local_name => use_name
+
   PreservedUseStmt(std::string modName, bool intrinsic, Kind k)
       : moduleName(std::move(modName)), isIntrinsic(intrinsic), kind(k) {}
 };
@@ -206,7 +206,7 @@ public:
     return equivalenceSets_;
   }
   void add_equivalenceSet(EquivalenceSet &&);
-  
+
   // Access preserved USE statements for debug info generation
   std::list<PreservedUseStmt> &preservedUseStmts() {
     return preservedUseStmts_;

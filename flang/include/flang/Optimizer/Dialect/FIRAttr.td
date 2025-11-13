@@ -250,10 +250,8 @@ def fir_UseRenameAttr : fir_Attr<"UseRename"> {
     local name and a symbol reference to the module variable.
   }];
 
-  let parameters = (ins
-    "mlir::StringAttr":$local_name,
-    "mlir::FlatSymbolRefAttr":$symbol
-  );
+  let parameters = (ins "mlir::StringAttr":$local_name,
+      "mlir::FlatSymbolRefAttr":$symbol);
 
   let assemblyFormat = "`<` $local_name `,` $symbol `>`";
 }

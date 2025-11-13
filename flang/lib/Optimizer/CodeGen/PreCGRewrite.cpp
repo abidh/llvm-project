@@ -362,8 +362,9 @@ public:
     target.addIllegalOp<fir::ReboxOp>();
     target.addIllegalOp<fir::DeclareOp>();
     target.addIllegalOp<fir::DummyScopeOp>();
-    // fir::UseStmtOp is NOT added here - it needs to be preserved for AddDebugInfo
-    // pass which runs after this pass. It will be removed during LLVM lowering.
+    // fir::UseStmtOp is NOT added here - it needs to be preserved for
+    // AddDebugInfo pass which runs after this pass. It will be removed during
+    // LLVM lowering.
     target.addDynamicallyLegalOp<fir::EmboxOp>([](fir::EmboxOp embox) {
       return !(embox.getShape() ||
                mlir::isa<fir::SequenceType>(

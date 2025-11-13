@@ -239,9 +239,10 @@ static mlir::FlatSymbolRefAttr gatherComponentInit(
 /// function lowering.
 
 /// Emit fir.use_stmt operations for USE statements in the given scope
-static void emitUseStatementsFromScope(
-    Fortran::lower::AbstractConverter &converter, mlir::OpBuilder &builder,
-    mlir::Location loc, const Fortran::semantics::Scope &scope) {
+static void
+emitUseStatementsFromScope(Fortran::lower::AbstractConverter &converter,
+                           mlir::OpBuilder &builder, mlir::Location loc,
+                           const Fortran::semantics::Scope &scope) {
   mlir::MLIRContext *context = builder.getContext();
 
   // Use the preserved USE statement information from semantic analysis.
@@ -259,8 +260,9 @@ static void emitUseStatementsFromScope(
       // Get the ultimate symbol (resolves USE associations)
       const auto &ultimateSym = sym->GetUltimate();
 
-      // Only mangle symbols that represent runtime entities (variables, procedures).
-      // Skip types - they cannot be mangled and don't generate debug info entries.
+      // Only mangle symbols that represent runtime entities (variables,
+      // procedures). Skip types - they cannot be mangled and don't generate
+      // debug info entries.
       if (ultimateSym.has<Fortran::semantics::DerivedTypeDetails>() ||
           ultimateSym.has<Fortran::semantics::TypeParamDetails>()) {
         return ""; // Types cannot be mangled, skip them
