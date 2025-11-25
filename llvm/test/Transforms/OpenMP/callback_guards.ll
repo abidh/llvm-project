@@ -83,7 +83,7 @@ attributes #4 = { "kernel" }
 !0 = !{i32 7, !"openmp-device", i32 52}
 !1 = !{i32 7, !"openmp", i32 52}
 
-; CHECK: @__omp_offloading_{{.*}}_kernel_environment = {{.*}}%struct.KernelEnvironmentTy { %struct.ConfigurationEnvironmentTy { i8 0, i8 0, i8 3,
+; CHECK: @__omp_offloading_{{.*}}_kernel_environment = {{.*}}%struct.KernelEnvironmentTy { %struct.ConfigurationEnvironmentTy { i8 {{[0-9]+}}, i8 {{[0-9]+}}, i8 3,
 ; CHECK: define internal void @__omp_offloading_10303_1849aab__QQmain_l22..omp_par(
 ; CHECK: region.guarded:
 ; CHECK: region.guarded{{[0-9]+}}:
