@@ -4740,8 +4740,6 @@ struct AAKernelInfoFunction : AAKernelInfo {
         auto *HS = A.getAAFor<AAHeapToStack>(
             *this, IRPosition::function(*I.getFunction()),
             DepClassTy::OPTIONAL);
-        auto &OMPInfoCache = static_cast<OMPInformationCache &>(A.getInfoCache());
-        auto &AllocSharedRFI = OMPInfoCache.RFIs[OMPRTL___kmpc_alloc_shared];
         if (UnderlyingObjsAA &&
             UnderlyingObjsAA->forallUnderlyingObjects([&](Value &Obj) {
               if (AA::isAssumedThreadLocalObject(A, Obj, *this))
@@ -4749,18 +4747,7 @@ struct AAKernelInfoFunction : AAKernelInfo {
               // Check for AAHeapToStack moved objects which must not be
               // guarded.
               auto *CB = dyn_cast<CallBase>(&Obj);
-              if (CB && HS && HS->isAssumedHeapToStack(*CB))
-                return true;
-              // Check if storing to __kmpc_alloc_shared allocation.
-              // These stores initialize shared state for all threads and
-              // should not be guarded.
-              if (CB && CB->getCalledFunction() == AllocSharedRFI.Declaration) {
-                LLVM_DEBUG(dbgs() << TAG << "Excluding store to "
-                                  << "__kmpc_alloc_shared allocation from "
-                                  << "guarding: " << *SI << "\n");
-                return true;
-              }
-              return false;
+              return CB && HS && HS->isAssumedHeapToStack(*CB);
             }))
           return true;
       }
