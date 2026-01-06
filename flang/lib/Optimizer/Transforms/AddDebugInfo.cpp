@@ -425,18 +425,64 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
       funcName = bindcName;
   }
 
-  llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
-  for (auto resTy : funcOp.getResultTypes()) {
-    auto tyAttr =
-        typeGen.convertType(resTy, fileAttr, cuAttr, /*declOp=*/nullptr);
-    types.push_back(tyAttr);
+  // For function definitions (non-external), find the dummy_scope and identify
+  // which argument (if any) is return-by-reference. This must be done before
+  // building the function type signature.
+  mlir::Value dummyScope;
+  std::optional<unsigned> returnByRefArgIdx;
+  
+  if (!funcOp.isExternal()) {
+    funcOp.walk([&](fir::UndefOp undef) -> mlir::WalkResult {
+      if (llvm::isa<fir::DummyScopeType>(undef.getType())) {
+        dummyScope = undef;
+        return mlir::WalkResult::interrupt();
+      }
+      return mlir::WalkResult::advance();
+    });
+
+    // Identify which function argument (if any) is return-by-reference.
+    // Return-by-reference arguments have ext_declare with NO dummy_scope and NO arg.
+    funcOp.walk([&](fir::cg::XDeclareOp declOp) -> mlir::WalkResult {
+      if (auto blockArg =
+              mlir::dyn_cast_or_null<mlir::BlockArgument>(declOp.getMemref())) {
+        if (blockArg.getOwner() == &funcOp.front()) {
+          // Check if this is return-by-reference: no dummy_scope and no arg number
+          if (!declOp.getDummyScope() && !declOp.getDummyArgNo()) {
+            returnByRefArgIdx = blockArg.getArgNumber();
+            return mlir::WalkResult::interrupt();
+          }
+        }
+      }
+      return mlir::WalkResult::advance();
+    });
   }
-  // If no return type then add a null type as a place holder for that.
-  if (types.empty())
-    types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
-  for (auto inTy : funcOp.getArgumentTypes()) {
-    auto tyAttr = typeGen.convertType(fir::unwrapRefType(inTy), fileAttr,
-                                      cuAttr, /*declOp=*/nullptr);
+
+  llvm::SmallVector<mlir::LLVM::DITypeAttr> types;
+  // If we found a return-by-reference argument, use its type as return type
+  if (returnByRefArgIdx) {
+    auto retTy = funcOp.getArgumentTypes()[*returnByRefArgIdx];
+    auto tyAttr = typeGen.convertType(fir::unwrapRefType(retTy),
+                                      fileAttr, cuAttr, /*declOp=*/nullptr);
+    types.push_back(tyAttr);
+  } else {
+    // Otherwise process explicit return types
+    for (auto resTy : funcOp.getResultTypes()) {
+      auto tyAttr =
+          typeGen.convertType(resTy, fileAttr, cuAttr, /*declOp=*/nullptr);
+      types.push_back(tyAttr);
+    }
+    // If no return type then add a null type as a place holder for that.
+    if (types.empty())
+      types.push_back(mlir::LLVM::DINullTypeAttr::get(context));
+  }
+
+  // Add only the real arguments (skip return-by-reference argument)
+  for (auto [idx, argTy] : llvm::enumerate(funcOp.getArgumentTypes())) {
+    if (returnByRefArgIdx && idx == *returnByRefArgIdx)
+      continue; // Skip the return-by-reference argument
+
+    auto tyAttr = typeGen.convertType(fir::unwrapRefType(argTy),
+                                      fileAttr, cuAttr, /*declOp=*/nullptr);
     types.push_back(tyAttr);
   }
 
@@ -629,21 +675,8 @@ void AddDebugInfoPass::handleFuncOp(mlir::func::FuncOp funcOp,
   funcOp->setLoc(builder.getFusedLoc({l}, spAttr));
   addTargetOpDISP(/*lineTableOnly=*/false, entities);
 
-  // Find the first dummy_scope definition. This is the one of the current
-  // function. The other ones may come from inlined calls. The variables inside
-  // those inlined calls should not be identified as arguments of the current
-  // function.
-  mlir::Value dummyScope;
-  funcOp.walk([&](fir::UndefOp undef) -> mlir::WalkResult {
-    // TODO: delay fir.dummy_scope translation to undefined until
-    // codegeneration. This is nicer and safer to match.
-    if (llvm::isa<fir::DummyScopeType>(undef.getType())) {
-      dummyScope = undef;
-      return mlir::WalkResult::interrupt();
-    }
-    return mlir::WalkResult::advance();
-  });
-
+  // dummyScope was already found earlier when building the function type.
+  // Process the ext_declare operations for local variables.
   funcOp.walk([&](fir::cg::XDeclareOp declOp) {
     mlir::LLVM::DISubprogramAttr spTy = spAttr;
     if (auto tOp = declOp->getParentOfType<mlir::omp::TargetOp>()) {
