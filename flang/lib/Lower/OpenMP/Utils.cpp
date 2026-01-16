@@ -74,6 +74,11 @@ namespace omp {
 mlir::FlatSymbolRefAttr getOrGenImplicitDefaultDeclareMapper(
     lower::AbstractConverter &converter, mlir::Location loc,
     fir::RecordType recordType, llvm::StringRef mapperNameStr) {
+  // WORKAROUND: Disable implicit mapper generation due to bug in size calculation
+  // for types with character arrays (see issue #169382, commit 8aa7d823b0cb)
+  // Return empty symbol ref to prevent mapper generation entirely
+  return {};
+
   if (mapperNameStr.empty())
     return {};
 
