@@ -815,4 +815,331 @@ TEST(CodeExtractor, ArgsDebugInfo) {
   EXPECT_FALSE(verifyFunction(*Func));
 }
 
-} // end anonymous namespace
+TEST(CodeExtractor, AddrSpaceCastAllocaSinkingAllUsesInRegion) {
+  LLVMContext Ctx;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M(parseAssemblyString(R"ir(
+    target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-S32-A5"
+    target triple = "amdgcn-amd-amdhsa"
+
+    define void @foo() {
+    entry:
+      %myalloca = alloca i32, align 4, addrspace(5)
+      %cast = addrspacecast ptr addrspace(5) %myalloca to ptr
+      br label %extract
+
+    extract:
+      store i32 42, ptr %cast, align 4
+      %val = load i32, ptr %cast, align 4
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )ir",
+                                                Err, Ctx));
+
+  Function *Func = M->getFunction("foo");
+  SmallVector<BasicBlock *, 1> Blocks{getBlockByName(Func, "extract")};
+
+  CodeExtractor CE(Blocks, /* DominatorTree */ nullptr,
+                   /* AggregateArgs */ false, /* BlockFrequencyInfo */ nullptr,
+                   /* BranchProbabilityInfo */ nullptr,
+                   /* AssumptionCache */ nullptr,
+                   /* AllowVarArgs */ true,
+                   /* AllowAlloca */ true,
+                   /* AllocationBlock */ &Func->getEntryBlock());
+
+  EXPECT_TRUE(CE.isEligible());
+
+  CodeExtractorAnalysisCache CEAC(*Func);
+  SetVector<Value *> Inputs, Outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
+  CE.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
+
+  // The alloca should be identified for sinking since the addrspacecast
+  // and all its uses are in the extracted region
+  AllocaInst *AI = cast<AllocaInst>(getInstByName(Func, "myalloca"));
+  EXPECT_TRUE(SinkingCands.count(AI));
+
+  CE.findInputsOutputs(Inputs, Outputs, SinkingCands);
+
+  // The alloca should NOT be in Inputs since it will be sunk
+  EXPECT_FALSE(Inputs.count(AI));
+
+  Function *Outlined = CE.extractCodeRegion(CEAC, Inputs, Outputs);
+  EXPECT_TRUE(Outlined);
+
+  // Verify the alloca is now in the outlined function
+  bool AllocaInOutlined = false;
+  for (Instruction &I : instructions(Outlined)) {
+    if (auto *OutlinedAI = dyn_cast<AllocaInst>(&I)) {
+      if (OutlinedAI->getName() == "myalloca") {
+        AllocaInOutlined = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(AllocaInOutlined);
+
+  EXPECT_FALSE(verifyFunction(*Outlined));
+  EXPECT_FALSE(verifyFunction(*Func));
+}
+
+TEST(CodeExtractor, AddrSpaceCastAllocaNotSunkUsedOutside) {
+  LLVMContext Ctx;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M(parseAssemblyString(R"ir(
+    target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-S32-A5"
+    target triple = "amdgcn-amd-amdhsa"
+
+    define void @foo() {
+    entry:
+      %myalloca = alloca i32, align 4, addrspace(5)
+      %cast = addrspacecast ptr addrspace(5) %myalloca to ptr
+      br label %extract
+
+    extract:
+      store i32 42, ptr %cast, align 4
+      br label %exit
+
+    exit:
+      %val = load i32, ptr %cast, align 4
+      ret void
+    }
+  )ir",
+                                                Err, Ctx));
+
+  Function *Func = M->getFunction("foo");
+  SmallVector<BasicBlock *, 1> Blocks{getBlockByName(Func, "extract")};
+
+  CodeExtractor CE(Blocks, /* DominatorTree */ nullptr,
+                   /* AggregateArgs */ false, /* BlockFrequencyInfo */ nullptr,
+                   /* BranchProbabilityInfo */ nullptr,
+                   /* AssumptionCache */ nullptr,
+                   /* AllowVarArgs */ true,
+                   /* AllowAlloca */ true,
+                   /* AllocationBlock */ &Func->getEntryBlock());
+
+  EXPECT_TRUE(CE.isEligible());
+
+  CodeExtractorAnalysisCache CEAC(*Func);
+  SetVector<Value *> Inputs, Outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
+  CE.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
+
+  // The alloca should NOT be in SinkingCands because the addrspacecast
+  // has a use in the exit block (outside the extracted region)
+  AllocaInst *AI = cast<AllocaInst>(getInstByName(Func, "myalloca"));
+  EXPECT_FALSE(SinkingCands.count(AI));
+
+  CE.findInputsOutputs(Inputs, Outputs, SinkingCands);
+
+  // The addrspacecast should be in Inputs since it can't be sunk
+  Instruction *Cast = getInstByName(Func, "cast");
+  EXPECT_TRUE(Inputs.count(Cast));
+
+  Function *Outlined = CE.extractCodeRegion(CEAC, Inputs, Outputs);
+  EXPECT_TRUE(Outlined);
+
+  // Verify the alloca is still in the original function, not outlined
+  bool AllocaInOriginal = false;
+  for (Instruction &I : instructions(Func)) {
+    if (auto *OrigAI = dyn_cast<AllocaInst>(&I)) {
+      if (OrigAI->getName() == "myalloca") {
+        AllocaInOriginal = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(AllocaInOriginal);
+
+  EXPECT_FALSE(verifyFunction(*Outlined));
+  EXPECT_FALSE(verifyFunction(*Func));
+}
+
+TEST(CodeExtractor, AddrSpaceCastAllocaExplicitlyExcluded) {
+  LLVMContext Ctx;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M(parseAssemblyString(R"ir(
+    target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-S32-A5"
+    target triple = "amdgcn-amd-amdhsa"
+
+    define void @foo() {
+    entry:
+      %tid.addr = alloca i32, align 4, addrspace(5)
+      %tid.cast = addrspacecast ptr addrspace(5) %tid.addr to ptr
+      %regular = alloca i32, align 4, addrspace(5)
+      %regular.cast = addrspacecast ptr addrspace(5) %regular to ptr
+      br label %extract
+
+    extract:
+      store i32 0, ptr %tid.cast, align 4
+      store i32 42, ptr %regular.cast, align 4
+      %val1 = load i32, ptr %tid.cast, align 4
+      %val2 = load i32, ptr %regular.cast, align 4
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )ir",
+                                                Err, Ctx));
+
+  Function *Func = M->getFunction("foo");
+  SmallVector<BasicBlock *, 1> Blocks{getBlockByName(Func, "extract")};
+
+  CodeExtractor CE(Blocks, /* DominatorTree */ nullptr,
+                   /* AggregateArgs */ false, /* BlockFrequencyInfo */ nullptr,
+                   /* BranchProbabilityInfo */ nullptr,
+                   /* AssumptionCache */ nullptr,
+                   /* AllowVarArgs */ true,
+                   /* AllowAlloca */ true,
+                   /* AllocationBlock */ &Func->getEntryBlock());
+
+  EXPECT_TRUE(CE.isEligible());
+
+  // Explicitly exclude tid.cast from being sunk (simulating OpenMP runtime allocas)
+  Instruction *TidCast = getInstByName(Func, "tid.cast");
+  CE.excludeArgFromAggregate(TidCast);
+
+  CodeExtractorAnalysisCache CEAC(*Func);
+  SetVector<Value *> Inputs, Outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
+  CE.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
+
+  // tid.addr should NOT be in SinkingCands because its addrspacecast is excluded
+  AllocaInst *TidAddr = cast<AllocaInst>(getInstByName(Func, "tid.addr"));
+  EXPECT_FALSE(SinkingCands.count(TidAddr));
+
+  // regular alloca SHOULD be in SinkingCands since it's not excluded
+  AllocaInst *RegularAlloca = cast<AllocaInst>(getInstByName(Func, "regular"));
+  EXPECT_TRUE(SinkingCands.count(RegularAlloca));
+
+  CE.findInputsOutputs(Inputs, Outputs, SinkingCands);
+
+  // tid.cast should be in Inputs since tid.addr is not sunk
+  EXPECT_TRUE(Inputs.count(TidCast));
+
+  // regular.cast should NOT be in Inputs since regular is sunk
+  Instruction *RegularCast = getInstByName(Func, "regular.cast");
+  EXPECT_FALSE(Inputs.count(RegularCast));
+
+  Function *Outlined = CE.extractCodeRegion(CEAC, Inputs, Outputs);
+  EXPECT_TRUE(Outlined);
+
+  // Verify tid.addr is still in original function (not sunk)
+  bool TidInOriginal = false;
+  for (Instruction &I : instructions(Func)) {
+    if (auto *AI = dyn_cast<AllocaInst>(&I)) {
+      if (AI->getName() == "tid.addr") {
+        TidInOriginal = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(TidInOriginal);
+
+  // Verify regular alloca is in outlined function (was sunk)
+  bool RegularInOutlined = false;
+  for (Instruction &I : instructions(Outlined)) {
+    if (auto *AI = dyn_cast<AllocaInst>(&I)) {
+      if (AI->getName() == "regular") {
+        RegularInOutlined = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(RegularInOutlined);
+
+  // Outlined function should have at least 1 argument (tid.cast)
+  EXPECT_GE(Outlined->arg_size(), 1U);
+
+  EXPECT_FALSE(verifyFunction(*Outlined));
+  EXPECT_FALSE(verifyFunction(*Func));
+}
+
+TEST(CodeExtractor, AddrSpaceCastMultipleAllocasWithAddrspacecast) {
+  LLVMContext Ctx;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M(parseAssemblyString(R"ir(
+    target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-S32-A5"
+    target triple = "amdgcn-amd-amdhsa"
+
+    define void @foo() {
+    entry:
+      %alloca1 = alloca i32, align 4, addrspace(5)
+      %cast1 = addrspacecast ptr addrspace(5) %alloca1 to ptr
+      %alloca2 = alloca i32, align 4, addrspace(5)
+      %cast2 = addrspacecast ptr addrspace(5) %alloca2 to ptr
+      %alloca3 = alloca i32, align 4, addrspace(5)
+      %cast3 = addrspacecast ptr addrspace(5) %alloca3 to ptr
+      br label %extract
+
+    extract:
+      store i32 1, ptr %cast1, align 4
+      store i32 2, ptr %cast2, align 4
+      store i32 3, ptr %cast3, align 4
+      %v1 = load i32, ptr %cast1, align 4
+      %v2 = load i32, ptr %cast2, align 4
+      %v3 = load i32, ptr %cast3, align 4
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )ir",
+                                                Err, Ctx));
+
+  Function *Func = M->getFunction("foo");
+  SmallVector<BasicBlock *, 1> Blocks{getBlockByName(Func, "extract")};
+
+  CodeExtractor CE(Blocks, /* DominatorTree */ nullptr,
+                   /* AggregateArgs */ false, /* BlockFrequencyInfo */ nullptr,
+                   /* BranchProbabilityInfo */ nullptr,
+                   /* AssumptionCache */ nullptr,
+                   /* AllowVarArgs */ true,
+                   /* AllowAlloca */ true,
+                   /* AllocationBlock */ &Func->getEntryBlock());
+
+  EXPECT_TRUE(CE.isEligible());
+
+  CodeExtractorAnalysisCache CEAC(*Func);
+  SetVector<Value *> Inputs, Outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
+  CE.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
+
+  // All three allocas should be in SinkingCands since all uses are in the region
+  AllocaInst *Alloca1 = cast<AllocaInst>(getInstByName(Func, "alloca1"));
+  AllocaInst *Alloca2 = cast<AllocaInst>(getInstByName(Func, "alloca2"));
+  AllocaInst *Alloca3 = cast<AllocaInst>(getInstByName(Func, "alloca3"));
+
+  EXPECT_TRUE(SinkingCands.count(Alloca1));
+  EXPECT_TRUE(SinkingCands.count(Alloca2));
+  EXPECT_TRUE(SinkingCands.count(Alloca3));
+
+  CE.findInputsOutputs(Inputs, Outputs, SinkingCands);
+
+  Function *Outlined = CE.extractCodeRegion(CEAC, Inputs, Outputs);
+  EXPECT_TRUE(Outlined);
+
+  // Verify all allocas are in the outlined function
+  int AllocasInOutlined = 0;
+  for (Instruction &I : instructions(Outlined)) {
+    if (auto *AI = dyn_cast<AllocaInst>(&I)) {
+      StringRef Name = AI->getName();
+      if (Name == "alloca1" || Name == "alloca2" || Name == "alloca3") {
+        AllocasInOutlined++;
+      }
+    }
+  }
+  EXPECT_EQ(AllocasInOutlined, 3);
+
+  // Outlined function should have no arguments (all allocas were sunk)
+  EXPECT_EQ(Outlined->arg_size(), 0U);
+
+  EXPECT_FALSE(verifyFunction(*Outlined));
+  EXPECT_FALSE(verifyFunction(*Func));
+}
+
+} // end anonymous namespace1

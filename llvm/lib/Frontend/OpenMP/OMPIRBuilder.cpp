@@ -1937,6 +1937,11 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
           ? std::make_unique<DeviceSharedMemOutlineInfo>(*this)
           : std::make_unique<OutlineInfo>();
 
+  // Add TIDAddr and ZeroAddr to ExcludeArgsFromAggregate NOW (before calling
+  // findAllocas).
+  OI->ExcludeArgsFromAggregate.push_back(TIDAddr);
+  OI->ExcludeArgsFromAggregate.push_back(ZeroAddr);
+
   if (Config.isTargetDevice()) {
     // Generate OpenMP target specific runtime call
     OI->PostOutlineCB = [=, ToBeDeletedVec =
@@ -2000,10 +2005,8 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
       getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_global_thread_num);
 
   auto PrivHelper = [&](Value &V) -> Error {
-    if (&V == TIDAddr || &V == ZeroAddr) {
-      OI->ExcludeArgsFromAggregate.push_back(&V);
+    if (&V == TIDAddr || &V == ZeroAddr)
       return Error::success();
-    }
 
     SetVector<Use *> Uses;
     for (Use &U : V.uses())

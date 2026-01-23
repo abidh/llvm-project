@@ -594,9 +594,12 @@ void CodeExtractor::findAllocas(const CodeExtractorAnalysisCache &CEAC,
       I->replaceUsesOfWith(I->getOperand(1), CastI);
     }
 
-    // Follow any bitcasts.
+    // Follow any bitcasts or addrspacecasts.
     SmallVector<Instruction *, 2> Bitcasts;
     SmallVector<LifetimeMarkerInfo, 2> BitcastLifetimeInfo;
+    SmallVector<AddrSpaceCastInst *, 2> AddrspaceCastsToSink;
+
+    bool hasUnknownUse = false;
     for (User *U : AI->users()) {
       if (U->stripInBoundsConstantOffsets() == AI) {
         Instruction *Bitcast = cast<Instruction>(U);
@@ -610,9 +613,50 @@ void CodeExtractor::findAllocas(const CodeExtractorAnalysisCache &CEAC,
 
       // Found unknown use of AI.
       if (!definedInRegion(Blocks, U)) {
-        Bitcasts.clear();
-        break;
+        if (auto *ASC = dyn_cast<AddrSpaceCastInst>(U)) {
+          // Check if this addrspacecast (or the source alloca) is explicitly
+          // excluded.
+          bool isExcluded = ExcludeArgsFromAggregate.contains(ASC) ||
+                            ExcludeArgsFromAggregate.contains(AI);
+
+          if (isExcluded) {
+            LLVM_DEBUG(dbgs() << "Skipping alloca " << AI->getName()
+                              << " because it's excluded from sinking\n");
+            hasUnknownUse = true;
+            break;
+          }
+
+          // Check if all its uses are in the region.
+          bool allUsesInRegion = true;
+          for (User *ASCU : ASC->users()) {
+            if (!definedInRegion(Blocks, ASCU)) {
+              allUsesInRegion = false;
+              break;
+            }
+          }
+          if (allUsesInRegion) {
+            AddrspaceCastsToSink.push_back(ASC);
+            continue;
+          }
+        } else {
+          hasUnknownUse = true;
+          break;
+        }
       }
+    }
+
+    if (hasUnknownUse)
+      continue;
+
+    // If there are addrspacecasts to sink (even without lifetime markers), sink the alloca
+    if (!AddrspaceCastsToSink.empty()) {
+      LLVM_DEBUG(dbgs() << "Sinking alloca (via addrspacecast): " << *AI << "\n");
+      SinkCands.insert(AI);
+      for (AddrSpaceCastInst *ASC : AddrspaceCastsToSink) {
+        LLVM_DEBUG(dbgs() << "Sinking addrspacecast-of-alloca: " << *ASC << "\n");
+        SinkCands.insert(ASC);
+      }
+      continue;
     }
 
     // Either no bitcasts reference the alloca or there are unknown uses.
