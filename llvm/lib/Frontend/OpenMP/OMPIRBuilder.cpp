@@ -1737,6 +1737,10 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
     OI.FixUpNonEntryAllocas = true;
   }
 
+  // Add TIDAddr and ZeroAddr to ExcludeArgsFromAggregate NOW (before calling
+  // findAllocas).
+  OI.ExcludeArgsFromAggregate.push_back(TIDAddr);
+  OI.ExcludeArgsFromAggregate.push_back(ZeroAddr);
   OI.OuterAllocaBB = OuterAllocaBlock;
   OI.EntryBB = PRegEntryBB;
   OI.ExitBB = PRegExitBB;
@@ -1778,7 +1782,7 @@ OpenMPIRBuilder::InsertPointOrErrorTy OpenMPIRBuilder::createParallel(
 
   auto PrivHelper = [&](Value &V) -> Error {
     if (&V == TIDAddr || &V == ZeroAddr) {
-      OI.ExcludeArgsFromAggregate.push_back(&V);
+      // OI.ExcludeArgsFromAggregate.push_back(&V);
       return Error::success();
     }
 

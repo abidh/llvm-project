@@ -79,14 +79,14 @@ module attributes {llvm.data_layout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:6
 
 
 // CHECK:   define internal void @[[LOOP_BODY_FUNC]](i32 %[[CNT:.*]], ptr %[[LOOP_BODY_ARG_PTR:.*]]) #[[ATTRS:[0-9]+]] {
-// CHECK:       %[[GEP_PTR_0:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[LOOP_BODY_ARG_PTR]], i32 0, i32 0
-// CHECK:       %[[INT_PTR:.*]] = load ptr, ptr %[[GEP_PTR_0]], align 8, !align ![[ALIGN_INT:[0-9]+]]
-// CHECK:       %[[GEP_PTR_1:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[LOOP_BODY_ARG_PTR]], i32 0, i32 1
-// CHECK:       %[[STRUCT_PTR_0:.*]] = load ptr, ptr %[[GEP_PTR_1]], align 8, !align ![[ALIGN_STRUCT:[0-9]+]]
-// CHECK:       %[[GEP_PTR_2:.*]] = getelementptr { ptr, ptr, ptr }, ptr %[[LOOP_BODY_ARG_PTR]], i32 0, i32 2
-// CHECK:       %[[STRUCT_PTR_1:.*]] = load ptr, ptr %[[GEP_PTR_2]], align 8, !align ![[ALIGN_STRUCT:[0-9]+]]
-// CHECK:       store i32 %[[DATA_INT:.*]], ptr %[[INT_PTR]], align 4
+// With alloca sinking, the struct and i32 allocas are now local to this function
+// CHECK:       %[[STRUCT_ALLOC:.*]] = alloca { ptr, i64, i32, i8, i8, i8, i8, [1 x [3 x i64]] }, align 8, addrspace(5)
+// CHECK:       %[[INT_ALLOC:.*]] = alloca i32, align 4, addrspace(5)
+// CHECK:       %[[STRUCT_PTR_0:.*]] = addrspacecast ptr addrspace(5) %[[STRUCT_ALLOC]] to ptr
+// CHECK:       %[[INT_PTR:.*]] = addrspacecast ptr addrspace(5) %[[INT_ALLOC]] to ptr
+// CHECK:       %[[GEP_PTR_0:.*]] = getelementptr { ptr }, ptr %[[LOOP_BODY_ARG_PTR]], i32 0, i32 0
+// CHECK:       %[[STRUCT_PTR_1:.*]] = load ptr, ptr %[[GEP_PTR_0]], align 8, !align ![[ALIGN_STRUCT:[0-9]+]]
+// CHECK:       store i32 %{{.*}}, ptr %[[INT_PTR]], align 4
 // CHECK:       call void @llvm.memcpy.p0.p0.i32(ptr %[[STRUCT_PTR_0]], ptr %[[STRUCT_PTR_1]], i32 48, i1 false)
 
 // CHECK:       ![[ALIGN_STRUCT]] = !{i64 8}
-// CHECK:       ![[ALIGN_INT]] = !{i64 4}
