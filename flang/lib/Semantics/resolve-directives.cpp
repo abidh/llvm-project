@@ -20,6 +20,7 @@
 #include "flang/Parser/parse-tree.h"
 #include "flang/Parser/tools.h"
 #include "flang/Semantics/expression.h"
+#include "flang/Semantics/omp-declare-variant.h"
 #include "flang/Semantics/openmp-dsa.h"
 #include "flang/Semantics/openmp-modifiers.h"
 #include "flang/Semantics/openmp-utils.h"
@@ -727,7 +728,10 @@ public:
     PushContext(x.source, llvm::omp::Directive::OMPD_declare_variant);
     return true;
   }
-  void Post(const parser::OmpDeclareVariantDirective &) { PopContext(); };
+  void Post(const parser::OmpDeclareVariantDirective &x) {
+    ProcessOmpDeclareVariantDirective(x, context_);
+    PopContext();
+  }
 
   // 2.15.3 Data-Sharing Attribute Clauses
   bool Pre(const parser::OmpClause::Inclusive &x) {

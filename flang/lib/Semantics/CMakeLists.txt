@@ -36,6 +36,7 @@ add_flang_library(FortranSemantics
   dump-expr.cpp
   expression.cpp
   mod-file.cpp
+  omp-declare-variant.cpp
   openmp-dsa.cpp
   openmp-modifiers.cpp
   openmp-utils.cpp
