@@ -1087,6 +1087,10 @@ public:
     genFIR(eval, unstructuredContext);
   }
 
+  Fortran::lower::pft::Evaluation *getCurrentEvaluation() override final {
+    return evalPtr;
+  }
+
   //===--------------------------------------------------------------------===//
   // Utility methods
   //===--------------------------------------------------------------------===//

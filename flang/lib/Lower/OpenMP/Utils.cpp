@@ -13,6 +13,7 @@
 #include "Utils.h"
 
 #include "ClauseFinder.h"
+#include "mlir/Dialect/OpenMP/OpenMPInterfaces.h"
 #include "flang/Evaluate/fold.h"
 #include "flang/Evaluate/tools.h"
 #include <flang/Lower/AbstractConverter.h>
@@ -67,6 +68,17 @@ llvm::cl::opt<bool> treatIndexAsSection(
 namespace Fortran {
 namespace lower {
 namespace omp {
+
+bool isInsideOpenMPTargetRegion(AbstractConverter &converter) {
+  mlir::ModuleOp module{converter.getModuleOp()};
+  if (auto iface = mlir::dyn_cast<mlir::omp::OffloadModuleInterface>(
+          module.getOperation()))
+    if (iface.getIsTargetDevice())
+      return true;
+  return converter.getStateStack()
+             .getStackTop<OpenMPTargetRegionFrame>() != nullptr;
+}
+
 bool requiresImplicitDefaultDeclareMapper(
     const semantics::DerivedTypeSpec &typeSpec) {
   // ISO C interoperable types (e.g., c_ptr, c_funptr) must always have implicit

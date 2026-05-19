@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Lower/CallInterface.h"
+#include "flang/Lower/omp-declare-variant.h"
 #include "flang/Evaluate/fold.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/Mangler.h"
@@ -63,11 +64,26 @@ bool Fortran::lower::CallerInterface::hasAlternateReturns() const {
 
 /// Return the binding label (from BIND(C...)) or the mangled name of the
 /// symbol.
+static const Fortran::semantics::Symbol *
+getCalleeSymbol(const Fortran::evaluate::ProcedureDesignator &proc,
+                Fortran::lower::AbstractConverter &converter) {
+  if (const Fortran::semantics::Symbol *symbol = proc.GetSymbol()) {
+    const Fortran::semantics::Symbol &ultimate{symbol->GetUltimate()};
+    if (Fortran::lower::pft::Evaluation *eval = converter.getCurrentEvaluation())
+      if (const Fortran::semantics::Symbol *resolved =
+              Fortran::lower::omp::resolveDeclareVariantCallee(
+                  ultimate, *eval, converter))
+        return resolved;
+    return &ultimate;
+  }
+  return nullptr;
+}
+
 static std::string
 getProcMangledName(const Fortran::evaluate::ProcedureDesignator &proc,
                    Fortran::lower::AbstractConverter &converter) {
-  if (const Fortran::semantics::Symbol *symbol = proc.GetSymbol())
-    return converter.mangleName(symbol->GetUltimate());
+  if (const Fortran::semantics::Symbol *symbol = getCalleeSymbol(proc, converter))
+    return converter.mangleName(*symbol);
   assert(proc.GetSpecificIntrinsic() &&
          "expected intrinsic procedure in designator");
   return proc.GetName();
@@ -79,7 +95,7 @@ std::string Fortran::lower::CallerInterface::getMangledName() const {
 
 const Fortran::semantics::Symbol *
 Fortran::lower::CallerInterface::getProcedureSymbol() const {
-  return procRef.proc().GetSymbol();
+  return getCalleeSymbol(procRef.proc(), converter);
 }
 
 bool Fortran::lower::CallerInterface::isIndirectCall() const {

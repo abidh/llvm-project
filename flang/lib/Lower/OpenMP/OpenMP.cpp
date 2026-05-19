@@ -2850,8 +2850,10 @@ genTargetOp(lower::AbstractConverter &converter, lower::SymMap &symTable,
           .getIsTargetDevice();
 
   // Introduce a new host_eval information structure for this target region.
-  if (!isTargetDevice)
+  if (!isTargetDevice) {
     converter.getStateStack().stackPush<HostEvalInfoStackFrame>();
+    converter.getStateStack().stackPush<OpenMPTargetRegionFrame>();
+  }
 
   mlir::omp::TargetOperands clauseOps;
   DefaultMapsTy defaultMaps;
@@ -3054,8 +3056,10 @@ genTargetOp(lower::AbstractConverter &converter, lower::SymMap &symTable,
                     queue, item, dsp);
 
   // Remove the host_eval information structure created for this target region.
-  if (!isTargetDevice)
+  if (!isTargetDevice) {
     converter.getStateStack().stackPop();
+    converter.getStateStack().stackPop();
+  }
   return targetOp;
 }
 
@@ -4013,8 +4017,8 @@ static void
 genOMP(lower::AbstractConverter &converter, lower::SymMap &symTable,
        semantics::SemanticsContext &semaCtx, lower::pft::Evaluation &eval,
        const parser::OmpDeclareVariantDirective &declareVariantDirective) {
-  if (!semaCtx.langOptions().OpenMPSimd)
-    TODO(converter.getCurrentLocation(), "OmpDeclareVariantDirective");
+  // Variant entries are recorded during semantics; call sites resolve the
+  // callee in CallInterface via resolveDeclareVariantCallee.
 }
 
 static ReductionProcessor::GenCombinerCBTy processReductionCombiner(

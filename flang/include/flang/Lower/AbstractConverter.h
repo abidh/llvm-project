@@ -381,6 +381,11 @@ public:
     return loweringOptions;
   }
 
+  /// Return the PFT evaluation currently being lowered, if any.
+  virtual Fortran::lower::pft::Evaluation *getCurrentEvaluation() {
+    return nullptr;
+  }
+
   /// Find the symbol in one level up of symbol map such as for host-association
   /// in OpenMP code or return null.
   virtual Fortran::lower::SymbolBox

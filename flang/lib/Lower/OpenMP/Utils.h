@@ -12,7 +12,9 @@
 #include "flang/Lower/OpenMP/Clauses.h"
 #include "flang/Optimizer/Builder/HLFIRTools.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/OpenMPInterfaces.h"
 #include "mlir/IR/Location.h"
+#include "mlir/Support/StateStack.h"
 #include "mlir/IR/Value.h"
 #include "llvm/Support/CommandLine.h"
 #include <cstdint>
@@ -44,6 +46,16 @@ struct Evaluation;
 class AbstractConverter;
 
 namespace omp {
+
+/// Marker frame while lowering the body of an OpenMP \c target region on the
+/// host. Used by declare-variant resolution to select device variants.
+class OpenMPTargetRegionFrame
+    : public mlir::StateStackFrameBase<OpenMPTargetRegionFrame> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OpenMPTargetRegionFrame)
+};
+
+bool isInsideOpenMPTargetRegion(AbstractConverter &converter);
 
 struct DeclareTargetCaptureInfo {
   mlir::omp::DeclareTargetCaptureClause clause;
