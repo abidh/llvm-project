@@ -185,7 +185,7 @@ getMatchClauseContextSelector(const parser::OmpDirectiveSpecification &spec) {
   return nullptr;
 }
 
-void ProcessOmpDeclareVariantDirective(
+void RecordOmpDeclareVariantOnBase(
     const parser::OmpDeclareVariantDirective &directive,
     SemanticsContext &context) {
   const parser::OmpDirectiveSpecification &spec{directive.v};
@@ -201,7 +201,11 @@ void ProcessOmpDeclareVariantDirective(
     variant = GetObjectSymbol(std::get<1>(names->t));
   } else if (std::holds_alternative<parser::OmpLocator>(arg.u)) {
     variant = GetArgumentSymbol(arg);
-    base = variant;
+    const Scope &containingScope{context.FindScope(directive.source)};
+    if (const Symbol *
+        host{GetProgramUnitContaining(containingScope).symbol()}) {
+      base = host;
+    }
   }
   if (!base || !variant)
     return;

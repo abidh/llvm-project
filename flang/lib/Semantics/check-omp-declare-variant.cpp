@@ -16,6 +16,7 @@
 #include "flang/Common/visit.h"
 #include "flang/Evaluate/check-expression.h"
 #include "flang/Parser/parse-tree.h"
+#include "flang/Semantics/omp-declare-variant.h"
 #include "flang/Semantics/openmp-utils.h"
 #include "flang/Semantics/symbol.h"
 #include "flang/Semantics/tools.h"
@@ -93,7 +94,7 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
 
   auto InvalidArgument{[&](parser::CharBlock source) {
     context_.Say(source,
-        "The argument to the DECLARE_VARIANT directive should be [base-name:]variant-name"_err_en_US);
+        "The argument to the DECLARE VARIANT directive should be [base-name:]variant-name"_err_en_US);
   }};
 
   auto CheckProcedureSymbol{[&](const Symbol *sym, parser::CharBlock source) {
@@ -173,10 +174,14 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
 void OmpStructureChecker::Enter(const parser::OmpDeclareVariantDirective &x) {
   const parser::OmpDirectiveName &dirName{x.v.DirName()};
   PushContextAndClauseSets(dirName.source, dirName.v);
-  CheckOmpDeclareVariantDirective(x);
 }
 
-void OmpStructureChecker::Leave(const parser::OmpDeclareVariantDirective &) {
+void OmpStructureChecker::Leave(const parser::OmpDeclareVariantDirective &x) {
+  const bool hadFatal{context_.AnyFatalError()};
+  CheckOmpDeclareVariantDirective(x);
+  if (!hadFatal && !context_.AnyFatalError()) {
+    RecordOmpDeclareVariantOnBase(x, context_);
+  }
   dirContext_.pop_back();
 }
 

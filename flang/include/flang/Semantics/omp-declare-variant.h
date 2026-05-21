@@ -29,8 +29,8 @@ struct OmpDeclareVariantEntry {
 void appendConstructTraitsForDirective(llvm::omp::Directive dir,
     llvm::omp::VariantMatchInfo &vmi);
 
-void ProcessOmpDeclareVariantDirective(const parser::OmpDeclareVariantDirective &,
-                                       SemanticsContext &);
+void RecordOmpDeclareVariantOnBase(
+    const parser::OmpDeclareVariantDirective &, SemanticsContext &);
 
 } // namespace Fortran::semantics
 
