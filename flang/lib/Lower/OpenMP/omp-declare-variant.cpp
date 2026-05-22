@@ -8,7 +8,7 @@
 
 #include "flang/Lower/omp-declare-variant.h"
 #include "flang/Lower/AbstractConverter.h"
-#include "OpenMP/Utils.h"
+#include "Utils.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/omp-declare-variant.h"

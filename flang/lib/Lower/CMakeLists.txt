@@ -31,7 +31,7 @@ add_flang_library(FortranLower
   OpenMP/Decomposer.cpp
   OpenMP/OpenMP.cpp
   OpenMP/Utils.cpp
-  omp-declare-variant.cpp
+  OpenMP/omp-declare-variant.cpp
   PFTBuilder.cpp
   Runtime.cpp
   Support/PrivateReductionUtils.cpp
