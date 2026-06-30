@@ -35,7 +35,7 @@ OmpDeclareVariantResolution ResolveOmpDeclareVariant(
   const parser::OmpDirectiveSpecification &spec{directive.v};
   const parser::OmpArgumentList &args{spec.Arguments()};
   if (args.v.size() != 1) {
-    result.form = OmpDeclareVariantForm::WrongArgCount;
+    result.kind = OmpDeclareVariantArgKind::WrongArgCount;
     return result;
   }
 
@@ -43,7 +43,7 @@ OmpDeclareVariantResolution ResolveOmpDeclareVariant(
   if (const auto *names{std::get_if<parser::OmpBaseVariantNames>(&arg.u)}) {
     result.base = GetObjectSymbol(std::get<0>(names->t));
     result.variant = GetObjectSymbol(std::get<1>(names->t));
-    result.form = OmpDeclareVariantForm::Names;
+    result.kind = OmpDeclareVariantArgKind::Names;
   } else if (std::holds_alternative<parser::OmpObject>(arg.u)) {
     result.variant = GetArgumentSymbol(arg);
     const Scope &containingScope{context.FindScope(directive.source)};
@@ -51,9 +51,9 @@ OmpDeclareVariantResolution ResolveOmpDeclareVariant(
         host{GetProgramUnitContaining(containingScope).symbol()}) {
       result.base = host;
     }
-    result.form = OmpDeclareVariantForm::Locator;
+    result.kind = OmpDeclareVariantArgKind::OmittedBaseName;
   } else {
-    result.form = OmpDeclareVariantForm::Invalid;
+    result.kind = OmpDeclareVariantArgKind::Invalid;
     return result;
   }
 
@@ -70,8 +70,8 @@ void RecordOmpDeclareVariantOnBase(
   // for emitting diagnostics.
   OmpDeclareVariantResolution resolved{
       ResolveOmpDeclareVariant(directive, context)};
-  if (resolved.form == OmpDeclareVariantForm::WrongArgCount ||
-      resolved.form == OmpDeclareVariantForm::Invalid)
+  if (resolved.kind == OmpDeclareVariantArgKind::WrongArgCount ||
+      resolved.kind == OmpDeclareVariantArgKind::Invalid)
     return;
   if (!resolved.base || !resolved.variant || !resolved.matchSelector)
     return;
@@ -81,10 +81,8 @@ void RecordOmpDeclareVariantOnBase(
   if (!base.detailsIf<SubprogramDetails>())
     return;
 
-  // Avoid recording the same directive twice. Name resolution walks each
-  // program unit more than once (ResolveOmpParts runs the OpenMP attribute
-  // visitor twice), so without this guard a single directive would be recorded
-  // multiple times.
+  // Avoid recording the same directive twice (ResolveOmpParts can run the
+  // OpenMP attribute visitor twice).
   SubprogramDetails &details{const_cast<Symbol &>(base).get<SubprogramDetails>()};
   for (const OmpDeclareVariantEntry &existing : details.ompDeclareVariants()) {
     if (&existing.variant.get() == &variant &&

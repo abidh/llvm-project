@@ -643,7 +643,7 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
 
   OmpDeclareVariantResolution resolved{ResolveOmpDeclareVariant(x, context_)};
 
-  if (resolved.form == OmpDeclareVariantForm::WrongArgCount) {
+  if (resolved.kind == OmpDeclareVariantArgKind::WrongArgCount) {
     context_.Say(args.source,
         "DECLARE_VARIANT directive should have a single argument"_err_en_US);
     return;
@@ -655,7 +655,7 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
         "The argument to the DECLARE_VARIANT directive should be [base-name:]variant-name"_err_en_US);
   }};
 
-  if (resolved.form == OmpDeclareVariantForm::Invalid) {
+  if (resolved.kind == OmpDeclareVariantArgKind::Invalid) {
     InvalidArgument(arg.source);
     return;
   }
@@ -678,10 +678,10 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
 
   const Symbol *base{resolved.base};
   const Symbol *variant{resolved.variant};
-  // The base-name:variant-name form checks both names; the locator form
-  // supplies the base implicitly (the host procedure) and only names the
+  // The base-name:variant-name form checks both names; the omitted-base-name
+  // form supplies the base implicitly (the host procedure) and only names the
   // variant. The base check precedes the variant check in the names form.
-  if (resolved.form == OmpDeclareVariantForm::Names) {
+  if (resolved.kind == OmpDeclareVariantArgKind::Names) {
     CheckProcedureSymbol(base, arg.source);
   }
   CheckProcedureSymbol(variant, arg.source);
@@ -712,11 +712,6 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
 }
 
 void OmpStructureChecker::Enter(const parser::OmpDeclareVariantDirective &x) {
-  // The directive context is pushed/popped centrally in
-  // Enter/Leave(OpenMPDeclarativeConstruct); this entry only runs the
-  // declare-variant-specific checks. The base-procedure entry used by lowering
-  // is recorded separately during name resolution (OmpAttributeVisitor); see
-  // RecordOmpDeclareVariantOnBase.
   CheckOmpDeclareVariantDirective(x);
 }
 

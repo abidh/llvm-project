@@ -23,34 +23,24 @@ namespace Fortran::semantics {
 class SemanticsContext;
 class Symbol;
 
-// A DECLARE VARIANT directive recorded on its base procedure. Rather than
-// storing a lowered llvm::omp::VariantMatchInfo (which would pull OMPContext.h
-// into symbol.h), keep a pointer to the parsed MATCH-clause context selector.
-// The pointer references the parse tree of the current compilation, which
-// outlives the symbol table; lowering rebuilds the VariantMatchInfo on demand
-// (see resolveDeclareVariantCallee). Keeping the parsed selector rather than a
-// lowered form is also meant to make recording this in module files feasible
-// later, but that module-file support is a follow-up and is not handled here.
+// A DECLARE VARIANT directive recorded on its base procedure. Lowering
+// builds the VariantMatchInfo on demand (see resolveDeclareVariantCallee).
 struct OmpDeclareVariantEntry {
   common::Reference<const Symbol> variant;
   const parser::traits::OmpContextSelectorSpecification *matchSelector{nullptr};
 };
 
-// Form of the single argument to a DECLARE VARIANT directive.
-enum class OmpDeclareVariantForm {
+// Kind of a DECLARE VARIANT directive's argument(s).
+enum class OmpDeclareVariantArgKind {
   WrongArgCount, // not exactly one argument
-  Invalid, // argument is neither [base-name:]variant-name nor a locator
+  Invalid, // argument is neither [base-name:]variant-name nor a bare name
   Names, // base-name:variant-name
-  Locator, // a single locator naming the variant; base is the host procedure
+  OmittedBaseName, // variant-name only; base is the host procedure
 };
 
-// Pieces of a DECLARE VARIANT directive resolved from the parse tree, shared by
-// the structure checker and the recorder so both use a single resolution path.
-// Symbols are raw (not ultimate); callers apply GetUltimate() as needed. No
-// diagnostics are emitted here -- the structure checker is responsible for
-// diagnosing any problems.
+// Pieces of a DECLARE VARIANT directive resolved from the parse tree.
 struct OmpDeclareVariantResolution {
-  OmpDeclareVariantForm form{OmpDeclareVariantForm::Invalid};
+  OmpDeclareVariantArgKind kind{OmpDeclareVariantArgKind::Invalid};
   const Symbol *base{nullptr};
   const Symbol *variant{nullptr};
   const parser::traits::OmpContextSelectorSpecification *matchSelector{nullptr};
