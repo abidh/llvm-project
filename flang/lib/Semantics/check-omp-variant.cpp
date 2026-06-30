@@ -19,6 +19,7 @@
 #include "flang/Parser/characters.h"
 #include "flang/Parser/message.h"
 #include "flang/Parser/parse-tree.h"
+#include "flang/Semantics/omp-declare-variant.h"
 #include "flang/Semantics/openmp-modifiers.h"
 #include "flang/Semantics/openmp-utils.h"
 #include "flang/Semantics/symbol.h"
@@ -591,15 +592,6 @@ void OmpStructureChecker::Leave(const parser::OmpMetadirectiveDirective &) {
   ExitDirectiveNest(MetadirectiveNest);
 }
 
-static const parser::traits::OmpContextSelectorSpecification *
-getMatchClauseContextSelector(const parser::OmpDirectiveSpecification &spec) {
-  for (const parser::OmpClause &clause : spec.Clauses().v) {
-    if (clause.Id() == llvm::omp::Clause::OMPC_match)
-      return &std::get<parser::OmpClause::Match>(clause.u).v.v;
-  }
-  return nullptr;
-}
-
 void OmpStructureChecker::CheckDeclareVariantUserConditions(
     const parser::OmpContextSelector &ctx) {
   using SetName = parser::OmpTraitSetSelectorName;
@@ -647,19 +639,26 @@ void OmpStructureChecker::CheckDeclareVariantUserConditions(
 
 void OmpStructureChecker::CheckOmpDeclareVariantDirective(
     const parser::OmpDeclareVariantDirective &x) {
-  const parser::OmpDirectiveSpecification &spec{x.v};
-  const parser::OmpArgumentList &args{spec.Arguments()};
+  const parser::OmpArgumentList &args{x.v.Arguments()};
 
-  if (args.v.size() != 1) {
+  OmpDeclareVariantResolution resolved{ResolveOmpDeclareVariant(x, context_)};
+
+  if (resolved.form == OmpDeclareVariantForm::WrongArgCount) {
     context_.Say(args.source,
         "DECLARE_VARIANT directive should have a single argument"_err_en_US);
     return;
   }
 
+  const parser::OmpArgument &arg{args.v.front()};
   auto InvalidArgument{[&](parser::CharBlock source) {
     context_.Say(source,
         "The argument to the DECLARE_VARIANT directive should be [base-name:]variant-name"_err_en_US);
   }};
+
+  if (resolved.form == OmpDeclareVariantForm::Invalid) {
+    InvalidArgument(arg.source);
+    return;
+  }
 
   auto CheckProcedureSymbol{[&](const Symbol *sym, parser::CharBlock source) {
     if (sym) {
@@ -677,29 +676,15 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
     }
   }};
 
-  const Symbol *base{nullptr};
-  const Symbol *variant{nullptr};
-  const parser::OmpArgument &arg{args.v.front()};
-  common::visit( //
-      common::visitors{
-          [&](const parser::OmpBaseVariantNames &y) {
-            base = GetObjectSymbol(std::get<0>(y.t));
-            variant = GetObjectSymbol(std::get<1>(y.t));
-            CheckProcedureSymbol(base, arg.source);
-            CheckProcedureSymbol(variant, arg.source);
-          },
-          [&](const parser::OmpObject &y) {
-            variant = GetArgumentSymbol(arg);
-            CheckProcedureSymbol(variant, arg.source);
-            const Scope &containingScope{context_.FindScope(x.source)};
-            if (const Symbol *host{
-                    GetProgramUnitContaining(containingScope).symbol()}) {
-              base = host;
-            }
-          },
-          [&](auto &&y) { InvalidArgument(arg.source); },
-      },
-      arg.u);
+  const Symbol *base{resolved.base};
+  const Symbol *variant{resolved.variant};
+  // The base-name:variant-name form checks both names; the locator form
+  // supplies the base implicitly (the host procedure) and only names the
+  // variant. The base check precedes the variant check in the names form.
+  if (resolved.form == OmpDeclareVariantForm::Names) {
+    CheckProcedureSymbol(base, arg.source);
+  }
+  CheckProcedureSymbol(variant, arg.source);
 
   if (base && variant) {
     base = &base->GetUltimate();
@@ -714,21 +699,24 @@ void OmpStructureChecker::CheckOmpDeclareVariantDirective(
     }
   }
 
-  const parser::traits::OmpContextSelectorSpecification *matchSelector{
-      getMatchClauseContextSelector(spec)};
-  if (!matchSelector) {
+  if (!resolved.matchSelector) {
     context_.Say(x.source,
         "DECLARE_VARIANT directive requires a MATCH clause"_err_en_US);
     return;
   }
 
   EnterDirectiveNest(ContextSelectorNest);
-  CheckContextSelectorSpecification(*matchSelector);
-  CheckDeclareVariantUserConditions(*matchSelector);
+  CheckContextSelectorSpecification(*resolved.matchSelector);
+  CheckDeclareVariantUserConditions(*resolved.matchSelector);
   ExitDirectiveNest(ContextSelectorNest);
 }
 
 void OmpStructureChecker::Enter(const parser::OmpDeclareVariantDirective &x) {
+  // The directive context is pushed/popped centrally in
+  // Enter/Leave(OpenMPDeclarativeConstruct); this entry only runs the
+  // declare-variant-specific checks. The base-procedure entry used by lowering
+  // is recorded separately during name resolution (OmpAttributeVisitor); see
+  // RecordOmpDeclareVariantOnBase.
   CheckOmpDeclareVariantDirective(x);
 }
 

@@ -4472,8 +4472,8 @@ static void
 genOMP(lower::AbstractConverter &converter, lower::SymMap &symTable,
        semantics::SemanticsContext &semaCtx, lower::pft::Evaluation &eval,
        const parser::OmpDeclareVariantDirective &declareVariantDirective) {
-  if (!semaCtx.langOptions().OpenMPSimd)
-    TODO(converter.getCurrentLocation(), "OmpDeclareVariantDirective");
+  // Variant entries are recorded during semantics; call sites resolve the
+  // callee in CallInterface via resolveDeclareVariantCallee.
 }
 
 static ReductionProcessor::GenCombinerCBTy processReductionCombiner(

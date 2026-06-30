@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Lower/CallInterface.h"
+#include "flang/Lower/OpenMP.h"
 #include "flang/Evaluate/fold.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/Mangler.h"
@@ -63,11 +64,31 @@ bool Fortran::lower::CallerInterface::hasAlternateReturns() const {
 
 /// Return the binding label (from BIND(C...)) or the mangled name of the
 /// symbol.
+static const Fortran::semantics::Symbol *
+getCalleeSymbol(const Fortran::evaluate::ProcedureDesignator &proc,
+                Fortran::lower::AbstractConverter &converter) {
+  if (const Fortran::semantics::Symbol *symbol = proc.GetSymbol()) {
+    const Fortran::semantics::Symbol &ultimate{symbol->GetUltimate()};
+    // Only pay the cost of OpenMP declare-variant resolution when the callee
+    // actually carries variant entries; avoids overhead on every non-OpenMP
+    // call.
+    if (const auto *details =
+            ultimate.detailsIf<Fortran::semantics::SubprogramDetails>())
+      if (!details->ompDeclareVariants().empty())
+        if (const Fortran::semantics::Symbol *resolved =
+                Fortran::lower::omp::resolveDeclareVariantCallee(ultimate,
+                                                                  converter))
+          return resolved;
+    return &ultimate;
+  }
+  return nullptr;
+}
+
 static std::string
 getProcMangledName(const Fortran::evaluate::ProcedureDesignator &proc,
                    Fortran::lower::AbstractConverter &converter) {
-  if (const Fortran::semantics::Symbol *symbol = proc.GetSymbol())
-    return converter.mangleName(symbol->GetUltimate());
+  if (const Fortran::semantics::Symbol *symbol = getCalleeSymbol(proc, converter))
+    return converter.mangleName(*symbol);
   assert(proc.GetSpecificIntrinsic() &&
          "expected intrinsic procedure in designator");
   return proc.GetName();
@@ -79,7 +100,7 @@ std::string Fortran::lower::CallerInterface::getMangledName() const {
 
 const Fortran::semantics::Symbol *
 Fortran::lower::CallerInterface::getProcedureSymbol() const {
-  return procRef.proc().GetSymbol();
+  return getCalleeSymbol(procRef.proc(), converter);
 }
 
 bool Fortran::lower::CallerInterface::isIndirectCall() const {

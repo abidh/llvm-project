@@ -10,6 +10,7 @@
 #define FORTRAN_SEMANTICS_SYMBOL_H_
 
 #include "type.h"
+#include "flang/Semantics/omp-declare-variant.h"
 #include "flang/Common/enum-set.h"
 #include "flang/Common/reference.h"
 #include "flang/Common/visit.h"
@@ -307,6 +308,13 @@ public:
     openACCRoutineInfos_.push_back(info);
   }
 
+  const std::vector<OmpDeclareVariantEntry> &ompDeclareVariants() const {
+    return ompDeclareVariants_;
+  }
+  void addOmpDeclareVariant(OmpDeclareVariantEntry &&entry) {
+    ompDeclareVariants_.push_back(std::move(entry));
+  }
+
 private:
   bool isInterface_{false}; // true if this represents an interface-body
   bool isDummy_{false}; // true when interface of dummy procedure
@@ -325,6 +333,7 @@ private:
   std::vector<std::int64_t> cudaLaunchBounds_, cudaClusterDims_;
   // OpenACC routine information
   std::vector<OpenACCRoutineInfo> openACCRoutineInfos_;
+  std::vector<OmpDeclareVariantEntry> ompDeclareVariants_;
 
   friend llvm::raw_ostream &operator<<(
       llvm::raw_ostream &, const SubprogramDetails &);
